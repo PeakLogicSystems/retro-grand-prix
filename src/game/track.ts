@@ -45,10 +45,19 @@ export function createOvalTrack(): TrackDefinition {
   points.push({ x: x1, y: y1 - r });
   arc(x1 - r, y1 - r, 0, Math.PI / 2);
   points.push({ x: x1 - r, y: y1 });
+  const bottomMidIndex = points.length;
+  points.push({ x: (x0 + x1) / 2, y: y1 }); // start/finish: center of the bottom straight
   points.push({ x: x0 + r, y: y1 });
   arc(x0 + r, y1 - r, Math.PI / 2, Math.PI);
   points.push({ x: x0, y: y0 + r });
   arc(x0 + r, y0 + r, Math.PI, Math.PI * 1.5);
+
+  // Rotate the loop so the bottom-straight midpoint is index 0 - checkpoints,
+  // start position, and start angle are all derived from points[0] below, so
+  // rotating here is the one change needed to move the start/finish line.
+  const rotated = points.slice(bottomMidIndex).concat(points.slice(0, bottomMidIndex));
+  points.length = 0;
+  points.push(...rotated);
 
   const numCheckpoints = 8;
   const checkpoints: Point[] = [];
