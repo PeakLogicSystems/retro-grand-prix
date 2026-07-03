@@ -1,14 +1,41 @@
+const GAME_KEYS_LIST = [
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+];
+const GAME_KEYS = new Set(GAME_KEYS_LIST);
+
+// Some environments (remote desktop/VM input redirection, certain
+// keyboards) don't forward a true "held" state - they resend discrete
+// down+up pairs every ~100ms to simulate a hold instead of one down
+// followed by repeat=true events. So instead of trusting keyup, a key
+// counts as "down" until this long has passed since its last keydown.
+const RELEASE_GRACE_MS = 150;
+
 export class InputManager {
-  private readonly pressed = new Set<string>();
+  private readonly lastDownAt = new Map<string, number>();
 
   constructor() {
     // event.code is the physical key ("KeyW"), unaffected by keyboard layout
     // or the Shift key - event.key would give "w" or "W" depending on both.
-    window.addEventListener('keydown', (e) => this.pressed.add(e.code));
-    window.addEventListener('keyup', (e) => this.pressed.delete(e.code));
+    window.addEventListener('keydown', (e) => {
+      this.lastDownAt.set(e.code, performance.now());
+      // Stop arrow keys/WASD from scrolling the page or triggering other defaults
+      if (GAME_KEYS.has(e.code)) e.preventDefault();
+    });
   }
 
   isDown(code: string): boolean {
-    return this.pressed.has(code);
+    const last = this.lastDownAt.get(code);
+    return last !== undefined && performance.now() - last < RELEASE_GRACE_MS;
+  }
+
+  debugSnapshot(): string {
+    return GAME_KEYS_LIST.filter((code) => this.isDown(code)).join(', ');
   }
 }

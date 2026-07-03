@@ -20,6 +20,15 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   const input = new InputManager();
   const car = new Car(canvas.width / 2, canvas.height / 2);
 
+  // Keyboard events only reach an element that has focus. The browser's
+  // address bar can hold focus after navigation, so controls silently do
+  // nothing until the player clicks the canvas - this makes that obvious.
+  let hasFocus = false;
+  canvas.addEventListener('focus', () => (hasFocus = true));
+  canvas.addEventListener('blur', () => (hasFocus = false));
+  canvas.addEventListener('click', () => canvas.focus());
+  canvas.focus();
+
   function drawGrid(): void {
     const spacing = 50;
     ctx.strokeStyle = '#1a1a1a';
@@ -62,6 +71,17 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       ctx.font = '14px monospace';
       ctx.textAlign = 'left';
       ctx.fillText(`speed: ${car.speed.toFixed(0)} px/s`, 10, 20);
+      ctx.fillText(`focus: ${hasFocus}`, 10, 40);
+      ctx.fillText(`keys down: ${input.debugSnapshot()}`, 10, 60);
+
+      if (!hasFocus) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('CLICK TO ENABLE CONTROLS', canvas.width / 2, canvas.height / 2);
+      }
     }
   );
 }

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Key event debug</title>
+    <style>
+      body {
+        background: #111;
+        color: #0f0;
+        font-family: monospace;
+        font-size: 14px;
+        padding: 16px;
+      }
+      #log div {
+        border-bottom: 1px solid #222;
+        padding: 2px 0;
+      }
+      .up {
+        color: #f66;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Click here, then hold an arrow key or WASD for ~2 seconds</h2>
+    <p>Newest events at top. Look for: one "down repeat=false", then several
+       "down repeat=true", then exactly one "up" when you release.</p>
+    <div id="log"></div>
+    <script>
+      const log = document.getElementById('log');
+      let count = 0;
+
+      function record(type, e) {
+        count++;
+        const line = document.createElement('div');
+        line.className = type;
+        const t = performance.now().toFixed(1);
+        line.textContent = `#${count} [${t}ms] ${type} code=${e.code} repeat=${e.repeat}`;
+        log.prepend(line);
+      }
+
+      window.addEventListener('keydown', (e) => record('down', e));
+      window.addEventListener('keyup', (e) => record('up', e));
+      window.addEventListener('blur', () => {
+        const line = document.createElement('div');
+        line.style.color = '#ff0';
+        line.textContent = `[${performance.now().toFixed(1)}ms] WINDOW BLURRED`;
+        log.prepend(line);
+      });
+    </script>
+  </body>
+</html>
