@@ -59,7 +59,7 @@ export class Car {
     const length = 24;
     const width = 12;
 
-    ctx.fillStyle = '#e33';
+    ctx.fillStyle = '#4fc3f7';
     ctx.fillRect(-length / 2, -width / 2, length, width);
 
     // White nose marker so facing direction is visible at a glance

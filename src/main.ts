@@ -16,6 +16,13 @@ if (!ctx) {
 
 main(canvas, ctx);
 
+// Placeholder scale until a track (M2) gives pixels a real-world size -
+// tuned so the car's current top speed reads as a plausible F1 top speed.
+const MPH_PER_PXPS = 0.75;
+function pxPerSecToMph(pxPerSec: number): number {
+  return pxPerSec * MPH_PER_PXPS;
+}
+
 function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   const input = new InputManager();
   const car = new Car(canvas.width / 2, canvas.height / 2);
@@ -70,7 +77,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       ctx.fillStyle = '#0f0';
       ctx.font = '14px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(`speed: ${car.speed.toFixed(0)} px/s`, 10, 20);
+      ctx.fillText(`speed: ${Math.abs(pxPerSecToMph(car.speed)).toFixed(0)} mph`, 10, 20);
       ctx.fillText(`focus: ${hasFocus}`, 10, 40);
       ctx.fillText(`keys down: ${input.debugSnapshot()}`, 10, 60);
 
