@@ -71,9 +71,20 @@ export class Car {
       else if (forwardSpeed < 0) forwardSpeed = Math.min(0, forwardSpeed + drag);
     }
 
-    const offTrackDrag = this.maxOffTrackDrag * (1 - g) * dt;
-    if (forwardSpeed > 0) forwardSpeed = Math.max(0, forwardSpeed - offTrackDrag);
-    else if (forwardSpeed < 0) forwardSpeed = Math.min(0, forwardSpeed + offTrackDrag);
+    // Low grip (e.g. grass) caps the speed it can *sustain* rather than
+    // fighting the accelerator outright. Earlier this was a flat drag force
+    // that could exceed the grip-reduced acceleration, making net
+    // acceleration negative - the car could never regain enough speed to
+    // steer back onto the track and got permanently stuck. Capping instead
+    // (bleeding excess speed down gradually, but never blocking the climb
+    // back up to the cap) guarantees recovery is always possible.
+    const forwardCap = this.maxSpeed * g;
+    const reverseCap = this.maxReverseSpeed * g;
+    if (forwardSpeed > forwardCap) {
+      forwardSpeed = Math.max(forwardCap, forwardSpeed - this.maxOffTrackDrag * dt);
+    } else if (forwardSpeed < reverseCap) {
+      forwardSpeed = Math.min(reverseCap, forwardSpeed + this.maxOffTrackDrag * dt);
+    }
 
     forwardSpeed = clamp(forwardSpeed, this.maxReverseSpeed, this.maxSpeed);
 
@@ -95,6 +106,15 @@ export class Car {
   // (this.angle) - the gap between the two is the drift/slip angle.
   get travelAngle(): number {
     return Math.atan2(this.vy, this.vx);
+  }
+
+  // Called when hitting a solid obstacle (guardrail, stand, building).
+  // Bounces back at a fraction of impact speed - a firm stop that reads as
+  // a crash, and small enough to not immediately re-penetrate the obstacle.
+  crash(): void {
+    this.vx *= -0.25;
+    this.vy *= -0.25;
+    this.speed = Math.hypot(this.vx, this.vy);
   }
 
   render(ctx: CanvasRenderingContext2D): void {

@@ -5,7 +5,8 @@ import { startGameLoop } from './game/loop';
 import { clamp } from './game/math';
 import { createOvalTrack, distanceToCenterline, renderTrack } from './game/track';
 import { LapTracker } from './game/lapTracker';
-import { renderTrackScenery } from './game/scenery';
+import { renderTrackScenery, getSceneryObstacles } from './game/scenery';
+import { resolveObstacleCollisions } from './game/collision';
 
 const canvas = document.getElementById('game-canvas');
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -39,6 +40,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   const track = createOvalTrack();
   const car = new Car(track.startPosition.x, track.startPosition.y, track.startAngle);
   const lapTracker = new LapTracker(track.checkpoints, track.checkpointRadius);
+  const obstacles = getSceneryObstacles(track);
 
   // Keyboard events only reach an element that has focus. The browser's
   // address bar can hold focus after navigation, so controls silently do
@@ -50,6 +52,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   canvas.focus();
 
   let onTrack = true;
+  let crashFlashTimer = 0;
 
   startGameLoop(
     (dt) => {
@@ -65,6 +68,11 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         },
         grip
       );
+
+      if (resolveObstacleCollisions(car, obstacles)) {
+        crashFlashTimer = 0.6;
+      }
+      crashFlashTimer = Math.max(0, crashFlashTimer - dt);
 
       // The track doesn't fill the whole canvas, and there's no world
       // beyond the canvas yet - this is a temporary hard edge, not a wall.
@@ -95,6 +103,15 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         100
       );
       ctx.fillText(`slip: ${Math.abs(angleDiffDegrees(car.angle, car.travelAngle)).toFixed(0)} deg`, 10, 120);
+
+      if (crashFlashTimer > 0) {
+        ctx.fillStyle = `rgba(255, 0, 0, ${(crashFlashTimer / 0.6) * 0.5})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 36px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('CRASH!', canvas.width / 2, canvas.height / 2);
+      }
 
       if (!hasFocus) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
