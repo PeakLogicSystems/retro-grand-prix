@@ -128,6 +128,22 @@ export function distanceToCenterline(track: TrackDefinition, x: number, y: numbe
   return min;
 }
 
+// Index of the centerline point closest to (x, y) - used by the cockpit
+// camera to find where "ahead" starts along the loop.
+export function findNearestPointIndex(track: TrackDefinition, x: number, y: number): number {
+  const pts = track.centerline;
+  let min = Infinity;
+  let minIndex = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const d = Math.hypot(pts[i].x - x, pts[i].y - y);
+    if (d < min) {
+      min = d;
+      minIndex = i;
+    }
+  }
+  return minIndex;
+}
+
 export function renderTrack(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
   const pts = track.centerline;
 

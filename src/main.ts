@@ -7,6 +7,9 @@ import { createOvalTrack, distanceToCenterline, renderTrack } from './game/track
 import { LapTracker } from './game/lapTracker';
 import { renderTrackScenery, getSceneryObstacles } from './game/scenery';
 import { resolveObstacleCollisions } from './game/collision';
+import { renderCockpitView } from './game/cockpitView';
+
+type ViewMode = 'overhead' | 'cockpit';
 
 const canvas = document.getElementById('game-canvas');
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -53,9 +56,14 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
 
   let onTrack = true;
   let crashFlashTimer = 0;
+  let viewMode: ViewMode = 'overhead';
 
   startGameLoop(
     (dt) => {
+      if (input.consumePress('KeyV')) {
+        viewMode = viewMode === 'overhead' ? 'cockpit' : 'overhead';
+      }
+
       const grip = onTrack ? 1 : OFF_TRACK_GRIP;
 
       car.update(
@@ -83,15 +91,20 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       lapTracker.update(dt, car.x, car.y);
     },
     () => {
-      ctx.fillStyle = '#173a17';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      renderTrack(ctx, track);
-      renderTrackScenery(ctx, track);
-
-      car.render(ctx);
+      if (viewMode === 'overhead') {
+        ctx.fillStyle = '#173a17';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        renderTrack(ctx, track);
+        renderTrackScenery(ctx, track);
+        car.render(ctx);
+      } else {
+        renderCockpitView(ctx, canvas, track, car);
+      }
 
       ctx.fillStyle = '#0f0';
       ctx.font = '14px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('[V] toggle view', canvas.width - 10, 20);
       ctx.textAlign = 'left';
       ctx.fillText(`speed: ${Math.abs(pxPerSecToMph(car.speed)).toFixed(0)} mph`, 10, 20);
       ctx.fillText(`on track: ${onTrack}`, 10, 40);
