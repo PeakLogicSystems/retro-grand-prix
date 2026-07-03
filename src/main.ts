@@ -5,7 +5,7 @@ import { startGameLoop } from './game/loop';
 import { clamp } from './game/math';
 import { createOvalTrack, distanceToCenterline, renderTrack } from './game/track';
 import { LapTracker } from './game/lapTracker';
-import { renderBottomGrandstand } from './game/scenery';
+import { renderTrackScenery } from './game/scenery';
 
 const canvas = document.getElementById('game-canvas');
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -73,7 +73,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       ctx.fillStyle = '#173a17';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       renderTrack(ctx, track);
-      renderBottomGrandstand(ctx, track);
+      renderTrackScenery(ctx, track);
 
       car.render(ctx);
 

@@ -5,6 +5,12 @@ export interface Point {
   y: number;
 }
 
+export interface CornerAnchor {
+  x: number;
+  y: number;
+  outwardAngle: number; // radians, direction pointing away from the track surface
+}
+
 export interface TrackDefinition {
   name: string;
   centerline: Point[]; // closed loop - last point connects back to the first
@@ -13,6 +19,10 @@ export interface TrackDefinition {
   checkpointRadius: number;
   startPosition: Point;
   startAngle: number;
+  cornerAnchors: {
+    bottomLeft: CornerAnchor;
+    bottomRight: CornerAnchor;
+  };
 }
 
 // Generates a rounded-rectangle "stadium" circuit as a dense polyline.
@@ -56,8 +66,29 @@ export function createOvalTrack(): TrackDefinition {
   // start position, and start angle are all derived from points[0] below, so
   // rotating here is the one change needed to move the start/finish line.
   const rotated = points.slice(bottomMidIndex).concat(points.slice(0, bottomMidIndex));
+
+  // Reverse the direction of travel while keeping the same start point:
+  // flip the order of everything after index 0.
+  const reversed = [rotated[0], ...rotated.slice(1).reverse()];
   points.length = 0;
-  points.push(...rotated);
+  points.push(...reversed);
+
+  // Corner geometry (arc center + sweep) is known here regardless of travel
+  // direction or start rotation, so anchors are computed from the original
+  // x0/y0/x1/y1/r values rather than re-derived from the point array.
+  const bottomRightAngle = Math.PI / 4; // midpoint of that corner's 0..PI/2 sweep
+  const bottomRightCorner: CornerAnchor = {
+    x: x1 - r + r * Math.cos(bottomRightAngle),
+    y: y1 - r + r * Math.sin(bottomRightAngle),
+    outwardAngle: bottomRightAngle,
+  };
+
+  const bottomLeftAngle = (Math.PI / 2) + Math.PI / 4; // midpoint of PI/2..PI sweep
+  const bottomLeftCorner: CornerAnchor = {
+    x: x0 + r + r * Math.cos(bottomLeftAngle),
+    y: y1 - r + r * Math.sin(bottomLeftAngle),
+    outwardAngle: bottomLeftAngle,
+  };
 
   const numCheckpoints = 8;
   const checkpoints: Point[] = [];
@@ -78,6 +109,10 @@ export function createOvalTrack(): TrackDefinition {
     checkpointRadius: 50,
     startPosition: { x: start.x, y: start.y },
     startAngle,
+    cornerAnchors: {
+      bottomLeft: bottomLeftCorner,
+      bottomRight: bottomRightCorner,
+    },
   };
 }
 
