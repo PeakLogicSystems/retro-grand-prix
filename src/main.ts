@@ -11,6 +11,10 @@ import { renderCockpitView } from './game/cockpitView';
 import { renderTrackSelectMenu } from './game/menu';
 import { sampleGhostAt, type GhostFrame } from './game/ghost';
 import { loadBestTimes, saveBestTime, loadGhost, saveGhost } from './game/storage';
+import { SoundEngine } from './game/audio';
+
+// Mirrors Car's private maxSpeed - used only to normalize engine pitch/volume.
+const APPROX_TOP_SPEED = 260;
 
 type ViewMode = 'overhead' | 'cockpit';
 
@@ -76,14 +80,20 @@ type GameState = { kind: 'menu'; selectedIndex: number } | { kind: 'race'; sessi
 function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   const input = new InputManager();
   const tracks = getAllTracks();
+  const sound = new SoundEngine();
 
   // Keyboard events only reach an element that has focus. The browser's
   // address bar can hold focus after navigation, so controls silently do
   // nothing until the player clicks the canvas - this makes that obvious.
+  // The same click is a real user gesture, so it doubles as what unlocks
+  // audio (browsers block sound until one occurs).
   let hasFocus = false;
   canvas.addEventListener('focus', () => (hasFocus = true));
   canvas.addEventListener('blur', () => (hasFocus = false));
-  canvas.addEventListener('click', () => canvas.focus());
+  canvas.addEventListener('click', () => {
+    canvas.focus();
+    sound.resume();
+  });
   canvas.focus();
 
   let state: GameState = { kind: 'menu', selectedIndex: 0 };
@@ -91,13 +101,18 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   startGameLoop(
     (dt) => {
       if (state.kind === 'menu') {
+        sound.updateEngine(0, false);
+
         if (input.consumePress('ArrowUp') || input.consumePress('KeyW')) {
           state.selectedIndex = (state.selectedIndex - 1 + tracks.length) % tracks.length;
+          sound.playMenuMove();
         }
         if (input.consumePress('ArrowDown') || input.consumePress('KeyS')) {
           state.selectedIndex = (state.selectedIndex + 1) % tracks.length;
+          sound.playMenuMove();
         }
         if (input.consumePress('Enter') || input.consumePress('Space')) {
+          sound.playMenuSelect();
           state = { kind: 'race', session: createRaceSession(tracks[state.selectedIndex]) };
         }
         return;
@@ -129,8 +144,11 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
 
       if (resolveObstacleCollisions(session.car, session.obstacles)) {
         session.crashFlashTimer = 0.6;
+        sound.playCrash();
       }
       session.crashFlashTimer = Math.max(0, session.crashFlashTimer - dt);
+
+      sound.updateEngine(session.car.speed / APPROX_TOP_SPEED, true);
 
       // The track doesn't fill the whole canvas, and there's no world
       // beyond the canvas yet - this is a temporary hard edge, not a wall.
@@ -145,8 +163,13 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
           session.ghost = session.recording;
           saveBestTime(session.track.name, lapResult.completedLapTime);
           saveGhost(session.track.name, session.ghost);
+          sound.playNewBest();
+        } else {
+          sound.playCheckpoint();
         }
         session.recording = [];
+      } else if (lapResult.reachedCheckpoint) {
+        sound.playCheckpoint();
       }
       session.recording.push({
         t: session.lapTracker.currentLapTime,

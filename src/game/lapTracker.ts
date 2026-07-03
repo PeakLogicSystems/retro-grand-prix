@@ -1,6 +1,7 @@
 import type { Point } from './track';
 
 export interface LapUpdateResult {
+  reachedCheckpoint: boolean;
   completedLap: boolean;
   isNewBest: boolean;
   completedLapTime: number | null;
@@ -32,17 +33,22 @@ export class LapTracker {
 
     const target = this.checkpoints[this.nextCheckpoint];
     if (Math.hypot(carX - target.x, carY - target.y) > this.radius) {
-      return { completedLap: false, isNewBest: false, completedLapTime: null };
+      return { reachedCheckpoint: false, completedLap: false, isNewBest: false, completedLapTime: null };
     }
 
-    let result: LapUpdateResult = { completedLap: false, isNewBest: false, completedLapTime: null };
+    let result: LapUpdateResult = {
+      reachedCheckpoint: true,
+      completedLap: false,
+      isNewBest: false,
+      completedLapTime: null,
+    };
 
     if (this.nextCheckpoint === 0) {
       if (this.started) {
         this.lapCount++;
         const isNewBest = this.bestLapTime === null || this.currentLapTime < this.bestLapTime;
         if (isNewBest) this.bestLapTime = this.currentLapTime;
-        result = { completedLap: true, isNewBest, completedLapTime: this.currentLapTime };
+        result = { reachedCheckpoint: true, completedLap: true, isNewBest, completedLapTime: this.currentLapTime };
       }
       this.started = true;
       this.currentLapTime = 0;

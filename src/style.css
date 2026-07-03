@@ -14,10 +14,32 @@ body {
   overflow: hidden;
 }
 
+#screen {
+  position: relative;
+  line-height: 0;
+}
+
 #game-canvas {
   background: #000;
   image-rendering: pixelated;
   border: 2px solid #444;
   outline: none;
   cursor: pointer;
+}
+
+/* Retro CRT feel: faint horizontal scanlines + a vignette darkening the
+   edges. Pure CSS, drawn once by the browser rather than every frame, so
+   it costs nothing at render time. */
+#crt-overlay {
+  position: absolute;
+  inset: 2px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 1px,
+    rgba(0, 0, 0, 0.18) 2px,
+    rgba(0, 0, 0, 0.18) 3px
+  );
+  box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.55);
 }
