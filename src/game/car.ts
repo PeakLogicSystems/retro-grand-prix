@@ -10,7 +10,7 @@ export interface CarControls {
 export class Car {
   x: number;
   y: number;
-  angle = 0; // radians, 0 = facing right
+  angle: number; // radians, 0 = facing right
   speed = 0; // px/sec, positive = forward, negative = reverse
 
   private readonly maxSpeed = 260;
@@ -19,24 +19,35 @@ export class Car {
   private readonly brakingForce = 340;
   private readonly coastFriction = 140;
   private readonly turnRate = Math.PI * 1.1;
+  private readonly maxOffTrackDrag = 260;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, angle = 0) {
     this.x = x;
     this.y = y;
+    this.angle = angle;
   }
 
-  update(dt: number, controls: CarControls): void {
+  // grip: 1 = full traction (on track), lower values (e.g. on grass) weaken
+  // acceleration/steering and add drag - a gradual slide rather than an
+  // instant speed cap, which would feel like teleporting.
+  update(dt: number, controls: CarControls, grip = 1): void {
+    const g = clamp(grip, 0, 1);
+
     if (controls.forward) {
-      this.speed += this.acceleration * dt;
+      this.speed += this.acceleration * g * dt;
     } else if (controls.backward) {
       // Braking (fast) while still rolling forward, reversing (slower) once stopped
       const decel = this.speed > 0 ? this.brakingForce : this.acceleration;
-      this.speed -= decel * dt;
+      this.speed -= decel * g * dt;
     } else {
       const drag = this.coastFriction * dt;
       if (this.speed > 0) this.speed = Math.max(0, this.speed - drag);
       else if (this.speed < 0) this.speed = Math.min(0, this.speed + drag);
     }
+
+    const offTrackDrag = this.maxOffTrackDrag * (1 - g) * dt;
+    if (this.speed > 0) this.speed = Math.max(0, this.speed - offTrackDrag);
+    else if (this.speed < 0) this.speed = Math.min(0, this.speed + offTrackDrag);
 
     this.speed = clamp(this.speed, this.maxReverseSpeed, this.maxSpeed);
 
@@ -44,7 +55,7 @@ export class Car {
     if (this.speed !== 0) {
       const steerInput = (controls.left ? -1 : 0) + (controls.right ? 1 : 0);
       const direction = this.speed > 0 ? 1 : -1;
-      this.angle += steerInput * this.turnRate * direction * dt;
+      this.angle += steerInput * this.turnRate * g * direction * dt;
     }
 
     this.x += Math.cos(this.angle) * this.speed * dt;
