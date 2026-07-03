@@ -5,23 +5,43 @@
 export class SoundEngine {
   private readonly ctx: AudioContext;
   private readonly engineOsc: OscillatorNode;
+  private readonly subOsc: OscillatorNode;
+  private readonly engineFilter: BiquadFilterNode;
   private readonly engineGain: GainNode;
 
   constructor() {
     this.ctx = new AudioContext();
 
     // Persistent engine hum - created once and left running, rather than a
-    // one-shot sound, since its pitch/volume need to track speed live.
+    // one-shot sound, since its pitch/volume need to track speed live. A
+    // single sawtooth read as a thin buzz rather than an engine, so this
+    // layers a sub-oscillator one octave below the fundamental for low-end
+    // body, and runs both through a lowpass filter that opens up (brighter,
+    // more aggressive) as revs climb - a rough analog of how a real
+    // engine's tone changes from a dull idle rumble to a harder snarl.
     this.engineOsc = this.ctx.createOscillator();
     this.engineOsc.type = 'sawtooth';
-    this.engineOsc.frequency.value = 60;
+    this.engineOsc.frequency.value = 32;
+
+    this.subOsc = this.ctx.createOscillator();
+    this.subOsc.type = 'sawtooth';
+    this.subOsc.frequency.value = 16;
+
+    this.engineFilter = this.ctx.createBiquadFilter();
+    this.engineFilter.type = 'lowpass';
+    this.engineFilter.frequency.value = 220;
+    this.engineFilter.Q.value = 1;
 
     this.engineGain = this.ctx.createGain();
     this.engineGain.gain.value = 0;
 
-    this.engineOsc.connect(this.engineGain);
+    this.engineOsc.connect(this.engineFilter);
+    this.subOsc.connect(this.engineFilter);
+    this.engineFilter.connect(this.engineGain);
     this.engineGain.connect(this.ctx.destination);
+
     this.engineOsc.start();
+    this.subOsc.start();
   }
 
   resume(): void {
@@ -32,12 +52,15 @@ export class SoundEngine {
   updateEngine(speedFraction: number, active: boolean): void {
     const now = this.ctx.currentTime;
     const clamped = Math.max(0, Math.min(1.3, speedFraction));
-    const targetFreq = 55 + clamped * 160;
-    const targetGain = active ? 0.03 + clamped * 0.05 : 0;
+    const baseFreq = 32 + clamped * 90; // deep range: ~32Hz idle to ~150Hz at high revs
+    const targetGain = active ? 0.05 + clamped * 0.09 : 0;
+    const filterFreq = 220 + clamped * 900;
 
     // Short ramps instead of snapping the value, so the pitch/volume glide
     // smoothly frame to frame rather than clicking/stepping audibly.
-    this.engineOsc.frequency.setTargetAtTime(targetFreq, now, 0.05);
+    this.engineOsc.frequency.setTargetAtTime(baseFreq, now, 0.05);
+    this.subOsc.frequency.setTargetAtTime(baseFreq / 2, now, 0.05);
+    this.engineFilter.frequency.setTargetAtTime(filterFreq, now, 0.05);
     this.engineGain.gain.setTargetAtTime(targetGain, now, 0.05);
   }
 

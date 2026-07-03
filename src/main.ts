@@ -206,10 +206,12 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         renderCockpitView(ctx, canvas, session.track, session.car);
       }
 
+      ctx.fillStyle = '#ffe066';
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('[V] view   [ESC] menu', canvas.width - 10, 24);
       ctx.fillStyle = '#0f0';
       ctx.font = '14px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('[V] view  [Esc] menu', canvas.width - 10, 20);
       ctx.textAlign = 'left';
       ctx.fillText(session.track.name, 10, 20);
       ctx.fillText(`speed: ${Math.abs(pxPerSecToMph(session.car.speed)).toFixed(0)} mph`, 10, 40);
