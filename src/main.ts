@@ -29,6 +29,11 @@ function pxPerSecToMph(pxPerSec: number): number {
 // Off-track grip: how much acceleration/steering the car keeps on grass.
 const OFF_TRACK_GRIP = 0.35;
 
+function angleDiffDegrees(a: number, b: number): number {
+  const diff = (((a - b + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  return (diff * 180) / Math.PI;
+}
+
 function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   const input = new InputManager();
   const track = createOvalTrack();
@@ -89,6 +94,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         10,
         100
       );
+      ctx.fillText(`slip: ${Math.abs(angleDiffDegrees(car.angle, car.travelAngle)).toFixed(0)} deg`, 10, 120);
 
       if (!hasFocus) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';

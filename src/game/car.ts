@@ -10,8 +10,11 @@ export interface CarControls {
 export class Car {
   x: number;
   y: number;
-  angle: number; // radians, 0 = facing right
-  speed = 0; // px/sec, positive = forward, negative = reverse
+  angle: number; // heading (chassis direction), radians - 0 = facing right
+  speed = 0; // px/sec, magnitude of actual ground velocity (for HUD display)
+
+  private vx = 0;
+  private vy = 0;
 
   private readonly maxSpeed = 260;
   private readonly maxReverseSpeed = -120;
@@ -20,6 +23,9 @@ export class Car {
   private readonly coastFriction = 140;
   private readonly turnRate = Math.PI * 1.1;
   private readonly maxOffTrackDrag = 260;
+  // How fast sideways (lateral) slip decays - this is "tire grip". Higher
+  // = corners feel glued down; lower = corners feel like ice.
+  private readonly gripStrength = 10;
 
   constructor(x: number, y: number, angle = 0) {
     this.x = x;
@@ -28,38 +34,67 @@ export class Car {
   }
 
   // grip: 1 = full traction (on track), lower values (e.g. on grass) weaken
-  // acceleration/steering and add drag - a gradual slide rather than an
-  // instant speed cap, which would feel like teleporting.
+  // acceleration and let lateral slip decay much more slowly - a gradual
+  // slide rather than an instant speed cap, which would feel like teleporting.
   update(dt: number, controls: CarControls, grip = 1): void {
     const g = clamp(grip, 0, 1);
 
+    // Steering always rotates the chassis heading at a fixed rate - grip no
+    // longer directly slows the wheel turn. Instead, low grip shows up as
+    // more slip below, which is the physically honest version of "harder to
+    // control on grass" (the wheel still turns; the tires just can't follow).
+    const priorSpeed = Math.hypot(this.vx, this.vy);
+    if (priorSpeed > 1) {
+      const steerInput = (controls.left ? -1 : 0) + (controls.right ? 1 : 0);
+      const travelingForward = this.vx * Math.cos(this.angle) + this.vy * Math.sin(this.angle) >= 0;
+      const direction = travelingForward ? 1 : -1;
+      this.angle += steerInput * this.turnRate * direction * dt;
+    }
+
+    // Decompose the momentum carried over from last frame against the
+    // *just-rotated* heading. Any mismatch here is the tire slip angle -
+    // this is what makes the car's actual path lag behind a sharp turn.
+    const fwd = { x: Math.cos(this.angle), y: Math.sin(this.angle) };
+    const right = { x: -Math.sin(this.angle), y: Math.cos(this.angle) };
+    let forwardSpeed = this.vx * fwd.x + this.vy * fwd.y;
+    let lateralSpeed = this.vx * right.x + this.vy * right.y;
+
     if (controls.forward) {
-      this.speed += this.acceleration * g * dt;
+      forwardSpeed += this.acceleration * g * dt;
     } else if (controls.backward) {
       // Braking (fast) while still rolling forward, reversing (slower) once stopped
-      const decel = this.speed > 0 ? this.brakingForce : this.acceleration;
-      this.speed -= decel * g * dt;
+      const decel = forwardSpeed > 0 ? this.brakingForce : this.acceleration;
+      forwardSpeed -= decel * g * dt;
     } else {
       const drag = this.coastFriction * dt;
-      if (this.speed > 0) this.speed = Math.max(0, this.speed - drag);
-      else if (this.speed < 0) this.speed = Math.min(0, this.speed + drag);
+      if (forwardSpeed > 0) forwardSpeed = Math.max(0, forwardSpeed - drag);
+      else if (forwardSpeed < 0) forwardSpeed = Math.min(0, forwardSpeed + drag);
     }
 
     const offTrackDrag = this.maxOffTrackDrag * (1 - g) * dt;
-    if (this.speed > 0) this.speed = Math.max(0, this.speed - offTrackDrag);
-    else if (this.speed < 0) this.speed = Math.min(0, this.speed + offTrackDrag);
+    if (forwardSpeed > 0) forwardSpeed = Math.max(0, forwardSpeed - offTrackDrag);
+    else if (forwardSpeed < 0) forwardSpeed = Math.min(0, forwardSpeed + offTrackDrag);
 
-    this.speed = clamp(this.speed, this.maxReverseSpeed, this.maxSpeed);
+    forwardSpeed = clamp(forwardSpeed, this.maxReverseSpeed, this.maxSpeed);
 
-    // A stationary car can't turn, and steering direction flips in reverse
-    if (this.speed !== 0) {
-      const steerInput = (controls.left ? -1 : 0) + (controls.right ? 1 : 0);
-      const direction = this.speed > 0 ? 1 : -1;
-      this.angle += steerInput * this.turnRate * g * direction * dt;
-    }
+    // Tires resist sideways sliding - frame-rate-independent exponential
+    // decay toward zero. Low grip (e.g. grass) decays much more slowly, so
+    // the car keeps sliding instead of snapping straight.
+    lateralSpeed *= Math.exp(-this.gripStrength * g * dt);
 
-    this.x += Math.cos(this.angle) * this.speed * dt;
-    this.y += Math.sin(this.angle) * this.speed * dt;
+    this.vx = fwd.x * forwardSpeed + right.x * lateralSpeed;
+    this.vy = fwd.y * forwardSpeed + right.y * lateralSpeed;
+
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+
+    this.speed = Math.hypot(this.vx, this.vy);
+  }
+
+  // Angle the car is actually moving, as opposed to the way it's pointed
+  // (this.angle) - the gap between the two is the drift/slip angle.
+  get travelAngle(): number {
+    return Math.atan2(this.vy, this.vx);
   }
 
   render(ctx: CanvasRenderingContext2D): void {
