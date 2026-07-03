@@ -23,6 +23,10 @@ export interface TrackDefinition {
     bottomLeft: CornerAnchor;
     bottomRight: CornerAnchor;
   };
+  // Target lap time (seconds) used as the baseline for championship points.
+  // A first guess, not derived from anything rigorous - like the physics
+  // constants, meant to be tuned after actual playtesting.
+  parLapTime: number;
 }
 
 export interface RoundedRectTrackOptions {
@@ -33,6 +37,7 @@ export interface RoundedRectTrackOptions {
   y1: number;
   cornerRadius: number;
   trackWidth: number;
+  parLapTime: number;
 }
 
 // Generates a rounded-rectangle "stadium" circuit as a dense polyline.
@@ -42,7 +47,7 @@ export interface RoundedRectTrackOptions {
 // multiple tracks (different footprint, corner tightness, road width) can
 // share this one generator instead of copy-pasting the whole shape.
 export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackDefinition {
-  const { name, x0, y0, x1, y1, trackWidth: width } = options;
+  const { name, x0, y0, x1, y1, trackWidth: width, parLapTime } = options;
   const r = options.cornerRadius;
   const arcSteps = 12;
 
@@ -124,6 +129,7 @@ export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackD
       bottomLeft: bottomLeftCorner,
       bottomRight: bottomRightCorner,
     },
+    parLapTime,
   };
 }
 
@@ -141,6 +147,7 @@ export function getAllTracks(): TrackDefinition[] {
       y1: 520,
       cornerRadius: 100,
       trackWidth: 90,
+      parLapTime: 15,
     }),
     createRoundedRectTrack({
       name: 'Riviera Street Circuit',
@@ -150,6 +157,7 @@ export function getAllTracks(): TrackDefinition[] {
       y1: 460,
       cornerRadius: 50,
       trackWidth: 60,
+      parLapTime: 12,
     }),
     createRoundedRectTrack({
       name: 'Sakura Speedway',
@@ -159,6 +167,7 @@ export function getAllTracks(): TrackDefinition[] {
       y1: 560,
       cornerRadius: 60,
       trackWidth: 75,
+      parLapTime: 13,
     }),
   ];
 }

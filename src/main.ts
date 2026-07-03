@@ -1,6 +1,6 @@
 import './style.css';
 import { InputManager } from './game/input';
-import { Car } from './game/car';
+import { Car, renderGhostCar } from './game/car';
 import { startGameLoop } from './game/loop';
 import { clamp } from './game/math';
 import { getAllTracks, distanceToCenterline, renderTrack, type TrackDefinition } from './game/track';
@@ -9,6 +9,8 @@ import { renderTrackScenery, getSceneryObstacles } from './game/scenery';
 import { resolveObstacleCollisions, type Obstacle } from './game/collision';
 import { renderCockpitView } from './game/cockpitView';
 import { renderTrackSelectMenu } from './game/menu';
+import { sampleGhostAt, type GhostFrame } from './game/ghost';
+import { loadBestTimes, saveBestTime, loadGhost, saveGhost } from './game/storage';
 
 type ViewMode = 'overhead' | 'cockpit';
 
@@ -50,17 +52,22 @@ interface RaceSession {
   onTrack: boolean;
   crashFlashTimer: number;
   viewMode: ViewMode;
+  ghost: GhostFrame[] | null; // best lap recorded so far (this session or a previous one)
+  recording: GhostFrame[]; // frames captured during the lap currently in progress
 }
 
 function createRaceSession(track: TrackDefinition): RaceSession {
+  const bestTimes = loadBestTimes();
   return {
     track,
     car: new Car(track.startPosition.x, track.startPosition.y, track.startAngle),
-    lapTracker: new LapTracker(track.checkpoints, track.checkpointRadius),
+    lapTracker: new LapTracker(track.checkpoints, track.checkpointRadius, bestTimes[track.name] ?? null),
     obstacles: getSceneryObstacles(track),
     onTrack: true,
     crashFlashTimer: 0,
     viewMode: 'overhead',
+    ghost: loadGhost(track.name),
+    recording: [],
   };
 }
 
@@ -131,7 +138,22 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       session.car.y = clamp(session.car.y, 20, canvas.height - 20);
 
       session.onTrack = distanceToCenterline(session.track, session.car.x, session.car.y) <= session.track.width / 2;
-      session.lapTracker.update(dt, session.car.x, session.car.y);
+
+      const lapResult = session.lapTracker.update(dt, session.car.x, session.car.y);
+      if (lapResult.completedLap) {
+        if (lapResult.isNewBest && lapResult.completedLapTime !== null) {
+          session.ghost = session.recording;
+          saveBestTime(session.track.name, lapResult.completedLapTime);
+          saveGhost(session.track.name, session.ghost);
+        }
+        session.recording = [];
+      }
+      session.recording.push({
+        t: session.lapTracker.currentLapTime,
+        x: session.car.x,
+        y: session.car.y,
+        angle: session.car.angle,
+      });
     },
     () => {
       if (state.kind === 'menu') {
@@ -146,6 +168,16 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         renderTrack(ctx, session.track);
         renderTrackScenery(ctx, session.track);
+
+        // Ghost of the best lap so far, positioned by the current lap's
+        // elapsed time - not implemented for cockpit view yet (would need
+        // to project the ghost through the same perspective math as the
+        // road), so it only appears in overhead view for now.
+        if (session.ghost) {
+          const ghostPos = sampleGhostAt(session.ghost, session.lapTracker.currentLapTime);
+          if (ghostPos) renderGhostCar(ctx, ghostPos.x, ghostPos.y, ghostPos.angle);
+        }
+
         session.car.render(ctx);
       } else {
         renderCockpitView(ctx, canvas, session.track, session.car);

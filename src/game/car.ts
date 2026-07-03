@@ -135,3 +135,20 @@ export class Car {
     ctx.restore();
   }
 }
+
+// Same silhouette as Car.render, but translucent and colorless - for
+// drawing the ghost of the player's own best lap alongside the real car.
+export function renderGhostCar(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.globalAlpha = 0.35;
+
+  const length = 24;
+  const width = 12;
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(-length / 2, -width / 2, length, width);
+
+  ctx.restore();
+}

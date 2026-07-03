@@ -1,4 +1,5 @@
 import type { TrackDefinition } from './track';
+import { getStandings, getTotalPoints } from './championship';
 
 export function renderTrackSelectMenu(
   ctx: CanvasRenderingContext2D,
@@ -13,21 +14,33 @@ export function renderTrackSelectMenu(
 
   ctx.fillStyle = '#4fc3f7';
   ctx.font = 'bold 40px monospace';
-  ctx.fillText('RETRO GRAND PRIX', canvas.width / 2, 100);
+  ctx.fillText('RETRO GRAND PRIX', canvas.width / 2, 90);
 
   ctx.fillStyle = '#aaa';
   ctx.font = '20px monospace';
-  ctx.fillText('Select a track', canvas.width / 2, 150);
+  ctx.fillText('Select a track', canvas.width / 2, 135);
 
-  const startY = 230;
-  const lineHeight = 50;
-  tracks.forEach((track, i) => {
+  const standings = getStandings(tracks);
+
+  const startY = 200;
+  const lineHeight = 55;
+  standings.forEach((entry, i) => {
     const y = startY + i * lineHeight;
     const selected = i === selectedIndex;
+
     ctx.fillStyle = selected ? '#4fc3f7' : '#888';
-    ctx.font = selected ? 'bold 26px monospace' : '22px monospace';
-    ctx.fillText((selected ? '> ' : '  ') + track.name, canvas.width / 2, y);
+    ctx.font = selected ? 'bold 24px monospace' : '20px monospace';
+    ctx.fillText((selected ? '> ' : '  ') + entry.track.name, canvas.width / 2, y);
+
+    ctx.fillStyle = selected ? '#9ad9f7' : '#555';
+    ctx.font = '14px monospace';
+    const best = entry.bestLapTime !== null ? `${entry.bestLapTime.toFixed(2)}s` : '--';
+    ctx.fillText(`best: ${best}   points: ${entry.points}`, canvas.width / 2, y + 20);
   });
+
+  ctx.fillStyle = '#4fc3f7';
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText(`Championship total: ${getTotalPoints(tracks)}`, canvas.width / 2, canvas.height - 90);
 
   ctx.fillStyle = '#666';
   ctx.font = '16px monospace';
