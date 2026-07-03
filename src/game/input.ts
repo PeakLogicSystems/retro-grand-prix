@@ -8,6 +8,9 @@ const GAME_KEYS_LIST = [
   'KeyS',
   'KeyD',
   'KeyV',
+  'Enter',
+  'Space',
+  'Escape',
 ];
 const GAME_KEYS = new Set(GAME_KEYS_LIST);
 

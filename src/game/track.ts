@@ -25,18 +25,26 @@ export interface TrackDefinition {
   };
 }
 
+export interface RoundedRectTrackOptions {
+  name: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  cornerRadius: number;
+  trackWidth: number;
+}
+
 // Generates a rounded-rectangle "stadium" circuit as a dense polyline.
 // Using one polyline for both rendering and collision (rather than separate
 // arc math for drawing and a simplified shape for collision) keeps the two
-// impossible to accidentally disagree with each other.
-export function createOvalTrack(): TrackDefinition {
-  const x0 = 160;
-  const y0 = 120;
-  const x1 = 800;
-  const y1 = 520;
-  const r = 100;
+// impossible to accidentally disagree with each other. Parametrized so
+// multiple tracks (different footprint, corner tightness, road width) can
+// share this one generator instead of copy-pasting the whole shape.
+export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackDefinition {
+  const { name, x0, y0, x1, y1, trackWidth: width } = options;
+  const r = options.cornerRadius;
   const arcSteps = 12;
-  const width = 90;
 
   const points: Point[] = [];
 
@@ -102,11 +110,14 @@ export function createOvalTrack(): TrackDefinition {
   const startAngle = Math.atan2(startNext.y - start.y, startNext.x - start.x);
 
   return {
-    name: 'Test Oval',
+    name,
     centerline: points,
     width,
     checkpoints,
-    checkpointRadius: 50,
+    // Scales with road width (tuned to match the original 90-wide track's
+    // radius of 50) so narrower tracks don't get a disproportionately huge
+    // checkpoint zone relative to the road.
+    checkpointRadius: Math.round(width * 0.56),
     startPosition: { x: start.x, y: start.y },
     startAngle,
     cornerAnchors: {
@@ -114,6 +125,42 @@ export function createOvalTrack(): TrackDefinition {
       bottomRight: bottomRightCorner,
     },
   };
+}
+
+// Fictional, "inspired by" circuits - no real track layouts or names, per
+// the project's legal note (docs/GDD.md). Different footprint/corner
+// radius/road width per track gives each a genuinely different driving
+// feel using the exact same generator.
+export function getAllTracks(): TrackDefinition[] {
+  return [
+    createRoundedRectTrack({
+      name: 'Grissom Oval',
+      x0: 160,
+      y0: 120,
+      x1: 800,
+      y1: 520,
+      cornerRadius: 100,
+      trackWidth: 90,
+    }),
+    createRoundedRectTrack({
+      name: 'Riviera Street Circuit',
+      x0: 300,
+      y0: 180,
+      x1: 660,
+      y1: 460,
+      cornerRadius: 50,
+      trackWidth: 60,
+    }),
+    createRoundedRectTrack({
+      name: 'Sakura Speedway',
+      x0: 380,
+      y0: 140,
+      x1: 580,
+      y1: 560,
+      cornerRadius: 60,
+      trackWidth: 75,
+    }),
+  ];
 }
 
 export function distanceToCenterline(track: TrackDefinition, x: number, y: number): number {

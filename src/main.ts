@@ -3,11 +3,12 @@ import { InputManager } from './game/input';
 import { Car } from './game/car';
 import { startGameLoop } from './game/loop';
 import { clamp } from './game/math';
-import { createOvalTrack, distanceToCenterline, renderTrack } from './game/track';
+import { getAllTracks, distanceToCenterline, renderTrack, type TrackDefinition } from './game/track';
 import { LapTracker } from './game/lapTracker';
 import { renderTrackScenery, getSceneryObstacles } from './game/scenery';
-import { resolveObstacleCollisions } from './game/collision';
+import { resolveObstacleCollisions, type Obstacle } from './game/collision';
 import { renderCockpitView } from './game/cockpitView';
+import { renderTrackSelectMenu } from './game/menu';
 
 type ViewMode = 'overhead' | 'cockpit';
 
@@ -38,12 +39,36 @@ function angleDiffDegrees(a: number, b: number): number {
   return (diff * 180) / Math.PI;
 }
 
+// Everything that belongs to one specific track attempt - rebuilt from
+// scratch each time a track is (re)selected, rather than mutating shared
+// state, so leftover state from a previous track can't leak into the next.
+interface RaceSession {
+  track: TrackDefinition;
+  car: Car;
+  lapTracker: LapTracker;
+  obstacles: Obstacle[];
+  onTrack: boolean;
+  crashFlashTimer: number;
+  viewMode: ViewMode;
+}
+
+function createRaceSession(track: TrackDefinition): RaceSession {
+  return {
+    track,
+    car: new Car(track.startPosition.x, track.startPosition.y, track.startAngle),
+    lapTracker: new LapTracker(track.checkpoints, track.checkpointRadius),
+    obstacles: getSceneryObstacles(track),
+    onTrack: true,
+    crashFlashTimer: 0,
+    viewMode: 'overhead',
+  };
+}
+
+type GameState = { kind: 'menu'; selectedIndex: number } | { kind: 'race'; session: RaceSession };
+
 function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   const input = new InputManager();
-  const track = createOvalTrack();
-  const car = new Car(track.startPosition.x, track.startPosition.y, track.startAngle);
-  const lapTracker = new LapTracker(track.checkpoints, track.checkpointRadius);
-  const obstacles = getSceneryObstacles(track);
+  const tracks = getAllTracks();
 
   // Keyboard events only reach an element that has focus. The browser's
   // address bar can hold focus after navigation, so controls silently do
@@ -54,19 +79,37 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   canvas.addEventListener('click', () => canvas.focus());
   canvas.focus();
 
-  let onTrack = true;
-  let crashFlashTimer = 0;
-  let viewMode: ViewMode = 'overhead';
+  let state: GameState = { kind: 'menu', selectedIndex: 0 };
 
   startGameLoop(
     (dt) => {
-      if (input.consumePress('KeyV')) {
-        viewMode = viewMode === 'overhead' ? 'cockpit' : 'overhead';
+      if (state.kind === 'menu') {
+        if (input.consumePress('ArrowUp') || input.consumePress('KeyW')) {
+          state.selectedIndex = (state.selectedIndex - 1 + tracks.length) % tracks.length;
+        }
+        if (input.consumePress('ArrowDown') || input.consumePress('KeyS')) {
+          state.selectedIndex = (state.selectedIndex + 1) % tracks.length;
+        }
+        if (input.consumePress('Enter') || input.consumePress('Space')) {
+          state = { kind: 'race', session: createRaceSession(tracks[state.selectedIndex]) };
+        }
+        return;
       }
 
-      const grip = onTrack ? 1 : OFF_TRACK_GRIP;
+      const session = state.session;
 
-      car.update(
+      if (input.consumePress('Escape')) {
+        const returnIndex = tracks.indexOf(session.track);
+        state = { kind: 'menu', selectedIndex: returnIndex < 0 ? 0 : returnIndex };
+        return;
+      }
+      if (input.consumePress('KeyV')) {
+        session.viewMode = session.viewMode === 'overhead' ? 'cockpit' : 'overhead';
+      }
+
+      const grip = session.onTrack ? 1 : OFF_TRACK_GRIP;
+
+      session.car.update(
         dt,
         {
           forward: input.isDown('ArrowUp') || input.isDown('KeyW'),
@@ -77,48 +120,60 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         grip
       );
 
-      if (resolveObstacleCollisions(car, obstacles)) {
-        crashFlashTimer = 0.6;
+      if (resolveObstacleCollisions(session.car, session.obstacles)) {
+        session.crashFlashTimer = 0.6;
       }
-      crashFlashTimer = Math.max(0, crashFlashTimer - dt);
+      session.crashFlashTimer = Math.max(0, session.crashFlashTimer - dt);
 
       // The track doesn't fill the whole canvas, and there's no world
       // beyond the canvas yet - this is a temporary hard edge, not a wall.
-      car.x = clamp(car.x, 20, canvas.width - 20);
-      car.y = clamp(car.y, 20, canvas.height - 20);
+      session.car.x = clamp(session.car.x, 20, canvas.width - 20);
+      session.car.y = clamp(session.car.y, 20, canvas.height - 20);
 
-      onTrack = distanceToCenterline(track, car.x, car.y) <= track.width / 2;
-      lapTracker.update(dt, car.x, car.y);
+      session.onTrack = distanceToCenterline(session.track, session.car.x, session.car.y) <= session.track.width / 2;
+      session.lapTracker.update(dt, session.car.x, session.car.y);
     },
     () => {
-      if (viewMode === 'overhead') {
+      if (state.kind === 'menu') {
+        renderTrackSelectMenu(ctx, canvas, tracks, state.selectedIndex);
+        return;
+      }
+
+      const session = state.session;
+
+      if (session.viewMode === 'overhead') {
         ctx.fillStyle = '#173a17';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        renderTrack(ctx, track);
-        renderTrackScenery(ctx, track);
-        car.render(ctx);
+        renderTrack(ctx, session.track);
+        renderTrackScenery(ctx, session.track);
+        session.car.render(ctx);
       } else {
-        renderCockpitView(ctx, canvas, track, car);
+        renderCockpitView(ctx, canvas, session.track, session.car);
       }
 
       ctx.fillStyle = '#0f0';
       ctx.font = '14px monospace';
       ctx.textAlign = 'right';
-      ctx.fillText('[V] toggle view', canvas.width - 10, 20);
+      ctx.fillText('[V] view  [Esc] menu', canvas.width - 10, 20);
       ctx.textAlign = 'left';
-      ctx.fillText(`speed: ${Math.abs(pxPerSecToMph(car.speed)).toFixed(0)} mph`, 10, 20);
-      ctx.fillText(`on track: ${onTrack}`, 10, 40);
-      ctx.fillText(`lap: ${lapTracker.lapCount}`, 10, 60);
-      ctx.fillText(`time: ${lapTracker.currentLapTime.toFixed(2)}s`, 10, 80);
+      ctx.fillText(session.track.name, 10, 20);
+      ctx.fillText(`speed: ${Math.abs(pxPerSecToMph(session.car.speed)).toFixed(0)} mph`, 10, 40);
+      ctx.fillText(`on track: ${session.onTrack}`, 10, 60);
+      ctx.fillText(`lap: ${session.lapTracker.lapCount}`, 10, 80);
+      ctx.fillText(`time: ${session.lapTracker.currentLapTime.toFixed(2)}s`, 10, 100);
       ctx.fillText(
-        `best: ${lapTracker.bestLapTime !== null ? lapTracker.bestLapTime.toFixed(2) + 's' : '--'}`,
+        `best: ${session.lapTracker.bestLapTime !== null ? session.lapTracker.bestLapTime.toFixed(2) + 's' : '--'}`,
         10,
-        100
+        120
       );
-      ctx.fillText(`slip: ${Math.abs(angleDiffDegrees(car.angle, car.travelAngle)).toFixed(0)} deg`, 10, 120);
+      ctx.fillText(
+        `slip: ${Math.abs(angleDiffDegrees(session.car.angle, session.car.travelAngle)).toFixed(0)} deg`,
+        10,
+        140
+      );
 
-      if (crashFlashTimer > 0) {
-        ctx.fillStyle = `rgba(255, 0, 0, ${(crashFlashTimer / 0.6) * 0.5})`;
+      if (session.crashFlashTimer > 0) {
+        ctx.fillStyle = `rgba(255, 0, 0, ${(session.crashFlashTimer / 0.6) * 0.5})`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 36px monospace';
