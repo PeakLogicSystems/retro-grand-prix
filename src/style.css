@@ -25,6 +25,13 @@ body {
   border: 2px solid #444;
   outline: none;
   cursor: pointer;
+  /* Mobile browsers show a translucent highlight (often blue) on tap-and-
+     hold by default - distracting during touch driving, since the touch
+     controls are held down continuously rather than briefly tapped. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Retro CRT feel: faint horizontal scanlines + a vignette darkening the

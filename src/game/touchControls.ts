@@ -89,9 +89,17 @@ export class TouchDriveControls {
     canvas.style.touchAction = 'none';
     canvas.addEventListener('pointerdown', (e) => this.updatePointer(e));
     canvas.addEventListener('pointermove', (e) => this.updatePointer(e));
-    canvas.addEventListener('pointerup', (e) => this.pointerZones.delete(e.pointerId));
-    canvas.addEventListener('pointercancel', (e) => this.pointerZones.delete(e.pointerId));
-    canvas.addEventListener('pointerleave', (e) => this.pointerZones.delete(e.pointerId));
+
+    // Release is listened for on window, not just the canvas: a finger
+    // lifted after sliding off the canvas (or a release the browser
+    // reports against a different target) would otherwise never clear
+    // that pointer's zone, leaving it stuck "on" forever - which reads as
+    // steering locked in place even after the finger is gone.
+    const release = (e: PointerEvent): void => {
+      this.pointerZones.delete(e.pointerId);
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
   }
 
   private updatePointer(e: PointerEvent): void {
