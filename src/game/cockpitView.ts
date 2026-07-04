@@ -13,7 +13,7 @@ const MAX_PROJECTED_POINTS = 50;
 // The literal track width read as too narrow to drive by comfortably in
 // this view - deliberately exaggerated well past strict accuracy so the
 // road is genuinely easy to track visually, not just technically visible.
-const WIDTH_EXAGGERATION = 1.75;
+const WIDTH_EXAGGERATION = 2.3;
 
 interface ProjectedPoint {
   screenX: number;
@@ -200,10 +200,9 @@ function renderMiniMap(
   const mapWidth = 170;
   const mapHeight = 120;
   const mapX = canvas.width - mapWidth - 16;
-  // Below the [G]/[V]/[ESC] buttons (main.ts draws them at y=8, height=26)
-  // rather than overlapping them - the two were fighting for the same
-  // top-right corner before.
-  const mapY = 44;
+  // Below the [V]/[ESC] buttons and the [G] button stacked under them
+  // (main.ts draws that stack from y=8 to y=68) rather than overlapping.
+  const mapY = 76;
   const padding = 10;
 
   const xs = track.centerline.map((p) => p.x);

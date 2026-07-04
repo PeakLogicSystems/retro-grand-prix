@@ -44,6 +44,10 @@ export interface TrackDefinition {
   bottomStraight: HorizontalStraightBounds;
   leftStraight: VerticalStraightBounds;
   rightStraight: VerticalStraightBounds;
+  // One polyline per S-curve, following the road's outer edge - a guardrail
+  // specifically where a curve exists, to stop the car sliding off in
+  // exactly the section that's hardest to hold a line through.
+  sCurveGuardrails: Point[][];
   // Target lap time (seconds) used as the baseline for championship points.
   // A first guess, not derived from anything rigorous - like the physics
   // constants, meant to be tuned after actual playtesting.
@@ -70,30 +74,74 @@ export interface RoundedRectTrackOptions {
   rightSCurve?: SCurveSpec;
 }
 
+interface StraightBuildResult {
+  points: Point[];
+  guardrail: Point[] | null;
+}
+
 // Points along a straight with an optional S-curve deviation, excluding the
 // very start (t=0) - callers either push that point explicitly (the top
 // straight, which has nothing before it) or it's already the last point of
-// the preceding corner arc.
-function buildHorizontalStraight(xStart: number, xEnd: number, y: number, sCurve?: SCurveSpec): Point[] {
-  if (!sCurve) return [{ x: xEnd, y }];
+// the preceding corner arc. When there's an S-curve, also returns a
+// guardrail polyline offset outward by halfWidth, using the curve's exact
+// tangent (from its derivative) to find the outward normal at each point -
+// outwardSign flips it to the correct side per call site (verified visually,
+// since working out the sign analytically for every orientation isn't worth
+// the risk of getting it backwards silently).
+function buildHorizontalStraight(
+  xStart: number,
+  xEnd: number,
+  y: number,
+  halfWidth: number,
+  outwardSign: 1 | -1,
+  sCurve?: SCurveSpec
+): StraightBuildResult {
+  if (!sCurve) return { points: [{ x: xEnd, y }], guardrail: null };
   const steps = 24;
-  const pts: Point[] = [];
+  const points: Point[] = [];
+  const guardrail: Point[] = [];
+  const dxdt = xEnd - xStart;
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    pts.push({ x: xStart + (xEnd - xStart) * t, y: y + sCurve.amplitude * Math.sin(2 * Math.PI * t) });
+    const x = xStart + dxdt * t;
+    const yPos = y + sCurve.amplitude * Math.sin(2 * Math.PI * t);
+    points.push({ x, y: yPos });
+
+    const dydt = sCurve.amplitude * 2 * Math.PI * Math.cos(2 * Math.PI * t);
+    const len = Math.hypot(dxdt, dydt) || 1;
+    const nx = (dydt / len) * outwardSign;
+    const ny = (-dxdt / len) * outwardSign;
+    guardrail.push({ x: x + nx * halfWidth, y: yPos + ny * halfWidth });
   }
-  return pts;
+  return { points, guardrail };
 }
 
-function buildVerticalStraight(yStart: number, yEnd: number, x: number, sCurve?: SCurveSpec): Point[] {
-  if (!sCurve) return [{ x, y: yEnd }];
+function buildVerticalStraight(
+  yStart: number,
+  yEnd: number,
+  x: number,
+  halfWidth: number,
+  outwardSign: 1 | -1,
+  sCurve?: SCurveSpec
+): StraightBuildResult {
+  if (!sCurve) return { points: [{ x, y: yEnd }], guardrail: null };
   const steps = 24;
-  const pts: Point[] = [];
+  const points: Point[] = [];
+  const guardrail: Point[] = [];
+  const dydt = yEnd - yStart;
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    pts.push({ x: x + sCurve.amplitude * Math.sin(2 * Math.PI * t), y: yStart + (yEnd - yStart) * t });
+    const y = yStart + dydt * t;
+    const xPos = x + sCurve.amplitude * Math.sin(2 * Math.PI * t);
+    points.push({ x: xPos, y });
+
+    const dxdt = sCurve.amplitude * 2 * Math.PI * Math.cos(2 * Math.PI * t);
+    const len = Math.hypot(dxdt, dydt) || 1;
+    const nx = (dydt / len) * outwardSign;
+    const ny = (-dxdt / len) * outwardSign;
+    guardrail.push({ x: xPos + nx * halfWidth, y: y + ny * halfWidth });
   }
-  return pts;
+  return { points, guardrail };
 }
 
 // Generates a rounded-rectangle "stadium" circuit as a dense polyline.
@@ -116,20 +164,29 @@ export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackD
     }
   }
 
+  const halfWidth = width / 2 + 6; // guardrail sits a little outside the road edge
+
   // Clockwise loop starting on the top straight, matching the angle
   // convention used elsewhere (0 = facing right, increasing = clockwise).
   points.push({ x: x0 + r, y: y0 });
-  points.push(...buildHorizontalStraight(x0 + r, x1 - r, y0, options.topSCurve));
+  const topResult = buildHorizontalStraight(x0 + r, x1 - r, y0, halfWidth, -1, options.topSCurve);
+  points.push(...topResult.points);
   arc(x1 - r, y0 + r, -Math.PI / 2, 0);
-  points.push(...buildVerticalStraight(y0 + r, y1 - r, x1, options.rightSCurve));
+  const rightResult = buildVerticalStraight(y0 + r, y1 - r, x1, halfWidth, 1, options.rightSCurve);
+  points.push(...rightResult.points);
   arc(x1 - r, y1 - r, 0, Math.PI / 2);
   points.push({ x: x1 - r, y: y1 });
   const bottomMidIndex = points.length;
   points.push({ x: (x0 + x1) / 2, y: y1 }); // start/finish: center of the bottom straight
   points.push({ x: x0 + r, y: y1 });
   arc(x0 + r, y1 - r, Math.PI / 2, Math.PI);
-  points.push(...buildVerticalStraight(y1 - r, y0 + r, x0, options.leftSCurve));
+  const leftResult = buildVerticalStraight(y1 - r, y0 + r, x0, halfWidth, -1, options.leftSCurve);
+  points.push(...leftResult.points);
   arc(x0 + r, y0 + r, Math.PI, Math.PI * 1.5);
+
+  const sCurveGuardrails: Point[][] = [topResult.guardrail, rightResult.guardrail, leftResult.guardrail].filter(
+    (g): g is Point[] => g !== null
+  );
 
   // Rotate the loop so the bottom-straight midpoint is index 0 - checkpoints,
   // start position, and start angle are all derived from points[0] below, so
@@ -189,6 +246,7 @@ export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackD
     bottomStraight: { xStart: x0 + r, xEnd: x1 - r, y: y1 },
     leftStraight: { yStart: y0 + r, yEnd: y1 - r, x: x0 },
     rightStraight: { yStart: y0 + r, yEnd: y1 - r, x: x1 },
+    sCurveGuardrails,
     parLapTime,
   };
 }
@@ -289,22 +347,28 @@ export function renderTrack(ctx: CanvasRenderingContext2D, track: TrackDefinitio
     ctx.fill();
   }
 
-  // Start/finish line, perpendicular to the track direction at checkpoint 0
+  // Checkered start/finish line, perpendicular to the track direction
   const start = track.checkpoints[0];
   const startIndex = pts.indexOf(start);
   const next = pts[(startIndex + 1) % pts.length];
   const dirX = next.x - start.x;
   const dirY = next.y - start.y;
-  const len = Math.hypot(dirX, dirY) || 1;
-  const perpX = (-dirY / len) * (track.width / 2);
-  const perpY = (dirX / len) * (track.width / 2);
+  const angle = Math.atan2(dirY, dirX);
 
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.moveTo(start.x - perpX, start.y - perpY);
-  ctx.lineTo(start.x + perpX, start.y + perpY);
-  ctx.stroke();
+  ctx.save();
+  ctx.translate(start.x, start.y);
+  ctx.rotate(angle);
+
+  const checkSize = 8;
+  const numAcross = Math.ceil(track.width / checkSize);
+  const rows = 2;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < numAcross; col++) {
+      ctx.fillStyle = (row + col) % 2 === 0 ? '#111' : '#eee';
+      ctx.fillRect((row - rows / 2) * checkSize, -track.width / 2 + col * checkSize, checkSize, checkSize);
+    }
+  }
+  ctx.restore();
 }
 
 function strokeClosedPath(ctx: CanvasRenderingContext2D, pts: Point[]): void {
@@ -313,4 +377,34 @@ function strokeClosedPath(ctx: CanvasRenderingContext2D, pts: Point[]): void {
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
   ctx.closePath();
   ctx.stroke();
+}
+
+// A guardrail specifically along each S-curve's outer edge - the section
+// hardest to hold a line through - with posts at intervals, matching the
+// look of the grandstand guardrails elsewhere.
+export function renderSCurveGuardrails(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+  for (const rail of track.sCurveGuardrails) {
+    ctx.strokeStyle = '#ddd';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(rail[0].x, rail[0].y);
+    for (let i = 1; i < rail.length; i++) ctx.lineTo(rail[i].x, rail[i].y);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < rail.length; i += 3) {
+      const prev = rail[Math.max(0, i - 1)];
+      const next = rail[Math.min(rail.length - 1, i + 1)];
+      const dx = next.x - prev.x;
+      const dy = next.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const px = (-dy / len) * 4;
+      const py = (dx / len) * 4;
+      ctx.beginPath();
+      ctx.moveTo(rail[i].x - px, rail[i].y - py);
+      ctx.lineTo(rail[i].x + px, rail[i].y + py);
+      ctx.stroke();
+    }
+  }
 }

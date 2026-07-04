@@ -3,9 +3,9 @@ import { InputManager } from './game/input';
 import { Car, renderGhostCar } from './game/car';
 import { startGameLoop } from './game/loop';
 import { clamp } from './game/math';
-import { getAllTracks, distanceToCenterline, renderTrack, type TrackDefinition } from './game/track';
+import { getAllTracks, distanceToCenterline, renderTrack, renderSCurveGuardrails, type TrackDefinition } from './game/track';
 import { LapTracker } from './game/lapTracker';
-import { renderTrackScenery, getSceneryObstacles } from './game/scenery';
+import { renderTrackScenery, getSceneryObstacles, getSCurveGuardrailObstacles } from './game/scenery';
 import { resolveObstacleCollisions, type Obstacle } from './game/collision';
 import { renderCockpitView } from './game/cockpitView';
 import { renderTrackSelectMenu } from './game/menu';
@@ -56,22 +56,29 @@ interface UiButton {
   label: string;
 }
 
-function getRaceButtons(session: RaceSession, canvas: HTMLCanvasElement): UiButton[] {
+// [V]/[ESC] sit together in the top-right corner; [G] stacks directly below
+// [ESC], right-aligned with it, rather than crowding the same row.
+function getRaceButtons(canvas: HTMLCanvasElement): UiButton[] {
   const y = 8;
   const height = 26;
   const gap = 8;
 
   const menu: UiButton = { x: canvas.width - 10 - 100, y, width: 100, height, label: '[ESC] MENU' };
   const view: UiButton = { x: menu.x - gap - 90, y, width: 90, height, label: '[V] VIEW' };
-  const ghost: UiButton = {
-    x: view.x - gap - 140,
-    y,
-    width: 140,
-    height,
+
+  return [view, menu];
+}
+
+function getGhostButton(session: RaceSession, canvas: HTMLCanvasElement): UiButton {
+  const width = 140;
+  const menuX = canvas.width - 10 - 100;
+  return {
+    x: menuX + 100 - width, // right-aligned with [ESC] MENU, directly below it
+    y: 8 + 26 + 8,
+    width,
+    height: 26,
     label: `[G] GHOST: ${session.ghostVisible ? 'ON' : 'OFF'}`,
   };
-
-  return [ghost, view, menu];
 }
 
 function pointInButton(x: number, y: number, b: UiButton): boolean {
@@ -108,13 +115,19 @@ interface RaceSession {
   recording: GhostFrame[]; // frames captured during the lap currently in progress
 }
 
+// How far back from the checkered line the car spawns, so it starts behind
+// the line rather than sitting on top of/overlapping it.
+const START_GRID_SETBACK = 25;
+
 function createRaceSession(track: TrackDefinition): RaceSession {
   const bestTimes = loadBestTimes();
+  const carStartX = track.startPosition.x - Math.cos(track.startAngle) * START_GRID_SETBACK;
+  const carStartY = track.startPosition.y - Math.sin(track.startAngle) * START_GRID_SETBACK;
   return {
     track,
-    car: new Car(track.startPosition.x, track.startPosition.y, track.startAngle),
+    car: new Car(carStartX, carStartY, track.startAngle),
     lapTracker: new LapTracker(track.checkpoints, track.checkpointRadius, bestTimes[track.name] ?? null),
-    obstacles: getSceneryObstacles(track),
+    obstacles: [...getSceneryObstacles(track), ...getSCurveGuardrailObstacles(track)],
     onTrack: true,
     crashFlashTimer: 0,
     viewMode: 'overhead',
@@ -157,7 +170,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
     const clickX = ((e.clientX - rect.left) * canvas.width) / rect.width;
     const clickY = ((e.clientY - rect.top) * canvas.height) / rect.height;
 
-    const [ghostBtn, viewBtn, menuBtn] = getRaceButtons(session, canvas);
+    const [viewBtn, menuBtn] = getRaceButtons(canvas);
     if (pointInButton(clickX, clickY, viewBtn)) {
       session.viewMode = session.viewMode === 'overhead' ? 'cockpit' : 'overhead';
       sound.playMenuMove();
@@ -165,7 +178,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       const returnIndex = tracks.indexOf(session.track);
       state = { kind: 'menu', selectedIndex: returnIndex < 0 ? 0 : returnIndex };
       sound.playMenuSelect();
-    } else if (pointInButton(clickX, clickY, ghostBtn)) {
+    } else if (pointInButton(clickX, clickY, getGhostButton(session, canvas))) {
       session.ghostVisible = !session.ghostVisible;
       sound.playMenuMove();
     }
@@ -271,6 +284,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         ctx.fillStyle = '#173a17';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         renderTrack(ctx, session.track);
+        renderSCurveGuardrails(ctx, session.track);
         renderTrackScenery(ctx, session.track);
 
         // Ghost of the best lap so far, positioned by the current lap's
@@ -287,7 +301,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         renderCockpitView(ctx, canvas, session.track, session.car);
       }
 
-      for (const button of getRaceButtons(session, canvas)) {
+      for (const button of getRaceButtons(canvas)) {
         renderButton(ctx, button);
       }
 
@@ -309,6 +323,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         10,
         140
       );
+      renderButton(ctx, getGhostButton(session, canvas));
 
       if (session.crashFlashTimer > 0) {
         ctx.fillStyle = `rgba(255, 0, 0, ${(session.crashFlashTimer / 0.6) * 0.5})`;

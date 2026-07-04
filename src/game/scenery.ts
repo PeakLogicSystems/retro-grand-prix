@@ -21,8 +21,9 @@ const PIT_MAX_WIDTH = 260;
 const PIT_GAP = 35;
 const TOWER_GAP = 30;
 
-const OBS_WIDTH = 55; // across, perpendicular to the straight
+const OBS_WIDTH = 55; // across, perpendicular to the straight (building only)
 const OBS_MAX_LENGTH = 200;
+const OBS_STAND_DEPTH = 16; // ground-level stands in front of the building
 
 interface StandPiece {
   kind: 'stand';
@@ -200,59 +201,85 @@ function renderPitBuilding(ctx: CanvasRenderingContext2D, piece: PitPiece): void
   ctx.fillRect(left, piece.trackEdgeY - 4, width, 4);
 }
 
-// A long two-story observation building with a railed viewing deck, more
-// like a real trackside race control/media center than a narrow tower -
-// runs along the straight the same way the grandstands and pit building do.
+// A long two-story observation building, more like a real trackside race
+// control/media center than a narrow tower. The roof only covers the far
+// (outward) half - the near (track-facing) half of the upper floor is an
+// open-glass viewing deck, which needs an unobstructed view of the track
+// rather than a roof over it. Ground-level bleacher stands sit in front.
 function renderObservationBuilding(ctx: CanvasRenderingContext2D, piece: TowerPiece): void {
-  const x = piece.trackEdgeX;
   const length = piece.length;
   const yTop = piece.centerY - length / 2;
+  const halfW = OBS_WIDTH / 2;
 
-  // Roof, slightly overhanging the two-story body
+  const standX = piece.trackEdgeX;
+  const buildingX = standX + OBS_STAND_DEPTH;
+
+  // Ground-level stands in front of the building
+  ctx.fillStyle = '#555';
+  ctx.fillRect(standX, yTop, OBS_STAND_DEPTH, length);
+  let s = 55;
+  function nextRandom(): number {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
+  }
+  for (let ly = yTop + 4; ly < yTop + length - 4; ly += 6) {
+    if (nextRandom() > 0.5) continue;
+    ctx.fillStyle = CROWD_COLORS[Math.floor(nextRandom() * CROWD_COLORS.length)];
+    ctx.fillRect(standX + 3 + nextRandom() * (OBS_STAND_DEPTH - 6), ly, 3, 3);
+  }
+
+  // Roof over the far (outward) half only
   ctx.fillStyle = '#333';
-  ctx.fillRect(x - 4, yTop - 4, OBS_WIDTH + 8, length + 8);
+  ctx.fillRect(buildingX + halfW, yTop - 4, halfW + 4, length + 8);
 
-  // Two-story body
+  // Building body
   ctx.fillStyle = '#4a4a5a';
-  ctx.fillRect(x, yTop, OBS_WIDTH, length);
+  ctx.fillRect(buildingX, yTop, OBS_WIDTH, length);
 
-  // Floor divider, splitting the body into two stories across its width
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x + OBS_WIDTH / 2, yTop);
-  ctx.lineTo(x + OBS_WIDTH / 2, yTop + length);
-  ctx.stroke();
-
-  // A column of windows per floor, running the building's length
+  // Far (roofed) half: ordinary small windows
   ctx.fillStyle = '#a8d8ff';
-  for (let floor = 0; floor < 2; floor++) {
-    const wx = x + 6 + floor * (OBS_WIDTH / 2);
-    for (let wy = yTop + 8; wy < yTop + length - 8; wy += 15) {
-      ctx.fillRect(wx, wy, OBS_WIDTH / 2 - 12, 9);
-    }
+  for (let wy = yTop + 8; wy < yTop + length - 8; wy += 16) {
+    ctx.fillRect(buildingX + halfW + 6, wy, halfW - 12, 8);
   }
 
-  // Railed viewing deck at the track-facing end
-  const deckDepth = 14;
-  ctx.fillStyle = '#666';
-  ctx.fillRect(x - 6, yTop - deckDepth - 2, OBS_WIDTH + 12, deckDepth);
-  ctx.strokeStyle = '#ccc';
-  ctx.lineWidth = 1;
-  for (let dx = x - 4; dx < x + OBS_WIDTH + 4; dx += 6) {
-    ctx.beginPath();
-    ctx.moveTo(dx, yTop - deckDepth - 2);
-    ctx.lineTo(dx, yTop - 4);
-    ctx.stroke();
+  // Near (track-facing) half: the second-story observation deck - long
+  // windows spanning most of the building's length, reading as a
+  // glass-fronted viewing lounge rather than a regular floor.
+  for (let wy = yTop + 6; wy < yTop + length - 6; wy += 20) {
+    ctx.fillRect(buildingX + 4, wy, halfW - 8, 14);
   }
 
-  // Antenna
+  // Checkered flags on poles at both ends of the roofed side - facing
+  // opposite directions, like real flags at either end of a straight
+  // facing back toward whichever way traffic approaches from.
+  const poleX = buildingX + halfW + halfW / 2;
+  renderCheckeredFlagPole(ctx, poleX, yTop - 4, 18, 1);
+  renderCheckeredFlagPole(ctx, poleX, yTop + length + 4, 18, -1);
+}
+
+function renderCheckeredFlagPole(
+  ctx: CanvasRenderingContext2D,
+  poleX: number,
+  poleBaseY: number,
+  poleHeight: number,
+  facing: 1 | -1
+): void {
   ctx.strokeStyle = '#888';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x + OBS_WIDTH / 2, yTop - deckDepth - 2);
-  ctx.lineTo(x + OBS_WIDTH / 2, yTop - deckDepth - 20);
+  ctx.moveTo(poleX, poleBaseY);
+  ctx.lineTo(poleX, poleBaseY - poleHeight);
   ctx.stroke();
+
+  const checkSize = 5;
+  const flagTop = poleBaseY - poleHeight;
+  const flagOriginX = facing === 1 ? poleX : poleX - checkSize * 2;
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 2; col++) {
+      ctx.fillStyle = (row + col) % 2 === 0 ? '#111' : '#eee';
+      ctx.fillRect(flagOriginX + col * checkSize, flagTop + row * checkSize, checkSize, checkSize);
+    }
+  }
 }
 
 export function renderTrackScenery(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
@@ -291,11 +318,35 @@ export function getSceneryObstacles(track: TrackDefinition): Obstacle[] {
     }
 
     return {
-      cx: piece.trackEdgeX + OBS_WIDTH / 2,
+      cx: piece.trackEdgeX + (OBS_STAND_DEPTH + OBS_WIDTH) / 2,
       cy: piece.centerY,
       angle: 0,
-      halfLength: OBS_WIDTH / 2,
+      halfLength: (OBS_STAND_DEPTH + OBS_WIDTH) / 2,
       halfWidth: piece.length / 2,
     };
   });
+}
+
+// One thin rectangular obstacle per guardrail segment - approximates the
+// curving rail as a chain of short straight walls, which reuses the
+// existing rotated-rectangle collision resolver instead of needing a
+// separate polyline-collision system just for this.
+export function getSCurveGuardrailObstacles(track: TrackDefinition): Obstacle[] {
+  const obstacles: Obstacle[] = [];
+  for (const rail of track.sCurveGuardrails) {
+    for (let i = 0; i < rail.length - 1; i++) {
+      const a = rail[i];
+      const b = rail[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      obstacles.push({
+        cx: (a.x + b.x) / 2,
+        cy: (a.y + b.y) / 2,
+        angle: Math.atan2(dy, dx),
+        halfLength: Math.hypot(dx, dy) / 2,
+        halfWidth: 3,
+      });
+    }
+  }
+  return obstacles;
 }
