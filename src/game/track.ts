@@ -164,7 +164,7 @@ export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackD
     }
   }
 
-  const halfWidth = width / 2 + 6; // guardrail sits a little outside the road edge
+  const halfWidth = width / 2 + 14; // guardrail sits further outside the road edge
 
   // Clockwise loop starting on the top straight, matching the angle
   // convention used elsewhere (0 = facing right, increasing = clockwise).

@@ -15,11 +15,13 @@ const STAND_FAR_Y = STAND_TOP_Y + STAND_HEIGHT;
 const PIT_HEIGHT = 50;
 const PIT_ROOF_HEIGHT = 10;
 const PIT_MAX_WIDTH = 260;
-// Gap between the track edge and each building - large enough that an
-// S-curve's lateral swing (up to ~25-30px on the tracks that have one)
-// can't reach far enough to visually overlap a fixed-position building.
-const PIT_GAP = 35;
-const TOWER_GAP = 30;
+// Gap between the track edge and each building/stand - large enough that
+// an S-curve's lateral swing (up to ~25-30px on the tracks that have one)
+// can't reach far enough to visually overlap a fixed-position building,
+// with extra breathing room on top of the strict minimum.
+const PIT_GAP = 48;
+const TOWER_GAP = 42;
+const STAND_GAP = 14;
 
 const OBS_WIDTH = 55; // across, perpendicular to the straight (building only)
 const OBS_MAX_LENGTH = 200;
@@ -80,7 +82,7 @@ function getSceneryPieces(track: TrackDefinition): SceneryPiece[] {
     (bottom.xStart + bottom.xEnd) / 2,
     bottom.y,
     Math.PI / 2,
-    track.width / 2
+    track.width / 2 + STAND_GAP
   );
   pieces.push({
     kind: 'stand',
@@ -92,11 +94,11 @@ function getSceneryPieces(track: TrackDefinition): SceneryPiece[] {
   });
 
   const bl = track.cornerAnchors.bottomLeft;
-  const blEdge = offsetOutward(bl.x, bl.y, bl.outwardAngle, track.width / 2);
+  const blEdge = offsetOutward(bl.x, bl.y, bl.outwardAngle, track.width / 2 + STAND_GAP);
   pieces.push({ kind: 'stand', edgeX: blEdge.x, edgeY: blEdge.y, outwardAngle: bl.outwardAngle, length: 130, seed: 7 });
 
   const br = track.cornerAnchors.bottomRight;
-  const brEdge = offsetOutward(br.x, br.y, br.outwardAngle, track.width / 2);
+  const brEdge = offsetOutward(br.x, br.y, br.outwardAngle, track.width / 2 + STAND_GAP);
   pieces.push({ kind: 'stand', edgeX: brEdge.x, edgeY: brEdge.y, outwardAngle: br.outwardAngle, length: 130, seed: 13 });
 
   const top = track.topStraight;
@@ -249,12 +251,14 @@ function renderObservationBuilding(ctx: CanvasRenderingContext2D, piece: TowerPi
     ctx.fillRect(buildingX + 4, wy, halfW - 8, 14);
   }
 
-  // Checkered flags on poles at both ends of the roofed side - facing
-  // opposite directions, like real flags at either end of a straight
-  // facing back toward whichever way traffic approaches from.
+  // Checkered flags on poles at both ends of the roofed side. Both flags
+  // face the same way (left/-x), and the south pole is inverted (extends
+  // +y, away from the building) so it mirrors the north pole (extends -y,
+  // also away from the building) rather than both pointing the same way
+  // in world space.
   const poleX = buildingX + halfW + halfW / 2;
-  renderCheckeredFlagPole(ctx, poleX, yTop - 4, 18, 1);
-  renderCheckeredFlagPole(ctx, poleX, yTop + length + 4, 18, -1);
+  renderCheckeredFlagPole(ctx, poleX, yTop - 4, 18, -1);
+  renderCheckeredFlagPole(ctx, poleX, yTop + length + 4, 18, 1);
 }
 
 function renderCheckeredFlagPole(
@@ -262,31 +266,109 @@ function renderCheckeredFlagPole(
   poleX: number,
   poleBaseY: number,
   poleHeight: number,
-  facing: 1 | -1
+  poleDirection: 1 | -1
 ): void {
+  const tipY = poleBaseY + poleDirection * poleHeight;
   ctx.strokeStyle = '#888';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(poleX, poleBaseY);
-  ctx.lineTo(poleX, poleBaseY - poleHeight);
+  ctx.lineTo(poleX, tipY);
   ctx.stroke();
 
+  // Flag sits at the free end (tip), extending back toward the base, and
+  // always to the left (-x) of the pole regardless of which way it points.
   const checkSize = 5;
-  const flagTop = poleBaseY - poleHeight;
-  const flagOriginX = facing === 1 ? poleX : poleX - checkSize * 2;
+  const flagOriginX = poleX - checkSize * 2;
   for (let row = 0; row < 2; row++) {
     for (let col = 0; col < 2; col++) {
       ctx.fillStyle = (row + col) % 2 === 0 ? '#111' : '#eee';
-      ctx.fillRect(flagOriginX + col * checkSize, flagTop + row * checkSize, checkSize, checkSize);
+      const y = tipY + row * checkSize * -poleDirection;
+      ctx.fillRect(flagOriginX + col * checkSize, y, checkSize, checkSize);
     }
   }
+}
+
+// A continuous pit lane strip running the length of the building (where
+// cars would drive past the garages), with a smoothly-tapered on-ramp and
+// off-ramp at either end merging into the main track edge - like a real
+// highway ramp widening to meet the road, not just a floating diagonal
+// patch. Visual only for now (not a drivable branch off the main loop yet;
+// that needs lap-validation/collision work beyond what a marking can do).
+function renderPitLaneMarkings(ctx: CanvasRenderingContext2D, piece: PitPiece): void {
+  const width = Math.min(piece.width, PIT_MAX_WIDTH);
+  const left = piece.centerX - width / 2;
+  const right = left + width;
+  const apronY = piece.trackEdgeY; // near edge of the pit building, facing the track
+  const trackEdgeY = apronY + PIT_GAP; // the actual track's outer edge
+  const laneHalf = 14;
+
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(left, apronY - laneHalf, width, laneHalf * 2);
+  ctx.strokeStyle = '#eee';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(left, apronY - laneHalf);
+  ctx.lineTo(right, apronY - laneHalf);
+  ctx.moveTo(left, apronY + laneHalf);
+  ctx.lineTo(right, apronY + laneHalf);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Mirror images of each other (direction flips which way the ramp flares
+  // out), so the exit is a proper reflection of the entry, not a
+  // differently-shaped patch.
+  renderPitRamp(ctx, left, apronY, trackEdgeY, laneHalf, -1, 'PIT IN');
+  renderPitRamp(ctx, right, apronY, trackEdgeY, laneHalf, 1, 'PIT OUT');
+}
+
+function renderPitRamp(
+  ctx: CanvasRenderingContext2D,
+  laneEndX: number,
+  apronY: number,
+  trackEdgeY: number,
+  laneHalf: number,
+  direction: 1 | -1,
+  label: string
+): void {
+  const rampLength = 40;
+  const farX = laneEndX + direction * rampLength;
+  const farHalf = laneHalf * 1.8; // flares wider where it meets the main track
+
+  ctx.fillStyle = '#3a3a3a';
+  ctx.beginPath();
+  ctx.moveTo(laneEndX, apronY - laneHalf);
+  ctx.lineTo(farX, trackEdgeY - farHalf);
+  ctx.lineTo(farX, trackEdgeY + farHalf);
+  ctx.lineTo(laneEndX, apronY + laneHalf);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#eee';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(laneEndX, apronY - laneHalf);
+  ctx.lineTo(farX, trackEdgeY - farHalf);
+  ctx.moveTo(laneEndX, apronY + laneHalf);
+  ctx.lineTo(farX, trackEdgeY + farHalf);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = '#ffe066';
+  ctx.font = 'bold 8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, (laneEndX + farX) / 2, (apronY + trackEdgeY) / 2 + 3);
 }
 
 export function renderTrackScenery(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
   for (const piece of getSceneryPieces(track)) {
     if (piece.kind === 'stand') renderGrandstand(ctx, piece);
-    else if (piece.kind === 'pit') renderPitBuilding(ctx, piece);
-    else renderObservationBuilding(ctx, piece);
+    else if (piece.kind === 'pit') {
+      renderPitLaneMarkings(ctx, piece);
+      renderPitBuilding(ctx, piece);
+    } else renderObservationBuilding(ctx, piece);
   }
 }
 
