@@ -43,3 +43,14 @@ export function saveGhost(trackName: string, frames: GhostFrame[]): void {
     // ignore - same reasoning as saveBestTime
   }
 }
+
+export function clearBest(trackName: string): void {
+  try {
+    const times = loadBestTimes();
+    delete times[trackName];
+    localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+    localStorage.removeItem(ghostKey(trackName));
+  } catch {
+    // ignore - same reasoning as saveBestTime
+  }
+}

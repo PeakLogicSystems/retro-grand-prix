@@ -8,6 +8,8 @@ const GAME_KEYS_LIST = [
   'KeyS',
   'KeyD',
   'KeyV',
+  'KeyG',
+  'KeyR',
   'Enter',
   'Space',
   'Escape',

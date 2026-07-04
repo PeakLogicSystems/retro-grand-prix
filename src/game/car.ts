@@ -16,12 +16,16 @@ export class Car {
   private vx = 0;
   private vy = 0;
 
-  private readonly maxSpeed = 260;
-  private readonly maxReverseSpeed = -120;
-  private readonly acceleration = 220;
-  private readonly brakingForce = 340;
+  // Speeds and turn rate lowered from earlier, faster values - reaction
+  // time matters even more in the cockpit view, and the car was generally
+  // too twitchy to hold a line, overcompensating into spins from small
+  // steering inputs.
+  private readonly maxSpeed = 225;
+  private readonly maxReverseSpeed = -100;
+  private readonly acceleration = 190;
+  private readonly brakingForce = 320;
   private readonly coastFriction = 140;
-  private readonly turnRate = Math.PI * 1.1;
+  private readonly turnRate = Math.PI * 0.5;
   private readonly maxOffTrackDrag = 260;
   // How fast sideways (lateral) slip decays - this is "tire grip". Higher
   // = corners feel glued down; lower = corners feel like ice.

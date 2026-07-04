@@ -45,4 +45,6 @@ export function renderTrackSelectMenu(
   ctx.fillStyle = '#666';
   ctx.font = '16px monospace';
   ctx.fillText('Up/Down or W/S to choose - Enter or Space to start', canvas.width / 2, canvas.height - 60);
+  ctx.fillStyle = '#a55';
+  ctx.fillText('[R] reset best time + ghost for selected track', canvas.width / 2, canvas.height - 38);
 }

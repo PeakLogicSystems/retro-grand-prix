@@ -15,9 +15,14 @@ const STAND_FAR_Y = STAND_TOP_Y + STAND_HEIGHT;
 const PIT_HEIGHT = 50;
 const PIT_ROOF_HEIGHT = 10;
 const PIT_MAX_WIDTH = 260;
+// Gap between the track edge and each building - large enough that an
+// S-curve's lateral swing (up to ~25-30px on the tracks that have one)
+// can't reach far enough to visually overlap a fixed-position building.
+const PIT_GAP = 35;
+const TOWER_GAP = 30;
 
-const TOWER_WIDTH = 50;
-const TOWER_HEIGHT = 90;
+const OBS_WIDTH = 55; // across, perpendicular to the straight
+const OBS_MAX_LENGTH = 200;
 
 interface StandPiece {
   kind: 'stand';
@@ -39,31 +44,10 @@ interface TowerPiece {
   kind: 'tower';
   trackEdgeX: number;
   centerY: number;
+  length: number;
 }
 
 type SceneryPiece = StandPiece | PitPiece | TowerPiece;
-
-// Derives a straight's extent from the track data itself (rather than
-// hardcoding coordinates) so this stays correct if the track shape changes.
-function getHorizontalStraight(
-  track: TrackDefinition,
-  mode: 'min' | 'max'
-): { xStart: number; xEnd: number; y: number } {
-  const pts = track.centerline;
-  const y = mode === 'max' ? Math.max(...pts.map((p) => p.y)) : Math.min(...pts.map((p) => p.y));
-  const xs = pts.filter((p) => Math.abs(p.y - y) < 0.5).map((p) => p.x);
-  return { xStart: Math.min(...xs), xEnd: Math.max(...xs), y };
-}
-
-function getVerticalStraight(
-  track: TrackDefinition,
-  mode: 'min' | 'max'
-): { yStart: number; yEnd: number; x: number } {
-  const pts = track.centerline;
-  const x = mode === 'max' ? Math.max(...pts.map((p) => p.x)) : Math.min(...pts.map((p) => p.x));
-  const ys = pts.filter((p) => Math.abs(p.x - x) < 0.5).map((p) => p.y);
-  return { yStart: Math.min(...ys), yEnd: Math.max(...ys), x };
-}
 
 function offsetOutward(
   x: number,
@@ -90,7 +74,7 @@ function localToWorld(
 function getSceneryPieces(track: TrackDefinition): SceneryPiece[] {
   const pieces: SceneryPiece[] = [];
 
-  const bottom = getHorizontalStraight(track, 'max');
+  const bottom = track.bottomStraight;
   const bottomEdge = offsetOutward(
     (bottom.xStart + bottom.xEnd) / 2,
     bottom.y,
@@ -114,19 +98,20 @@ function getSceneryPieces(track: TrackDefinition): SceneryPiece[] {
   const brEdge = offsetOutward(br.x, br.y, br.outwardAngle, track.width / 2);
   pieces.push({ kind: 'stand', edgeX: brEdge.x, edgeY: brEdge.y, outwardAngle: br.outwardAngle, length: 130, seed: 13 });
 
-  const top = getHorizontalStraight(track, 'min');
+  const top = track.topStraight;
   pieces.push({
     kind: 'pit',
     centerX: (top.xStart + top.xEnd) / 2,
-    trackEdgeY: top.y - track.width / 2 - 10,
+    trackEdgeY: top.y - track.width / 2 - PIT_GAP,
     width: top.xEnd - top.xStart,
   });
 
-  const right = getVerticalStraight(track, 'max');
+  const right = track.rightStraight;
   pieces.push({
     kind: 'tower',
-    trackEdgeX: right.x + track.width / 2 + 20,
+    trackEdgeX: right.x + track.width / 2 + TOWER_GAP,
     centerY: (right.yStart + right.yEnd) / 2,
+    length: Math.min(right.yEnd - right.yStart, OBS_MAX_LENGTH),
   });
 
   return pieces;
@@ -215,29 +200,58 @@ function renderPitBuilding(ctx: CanvasRenderingContext2D, piece: PitPiece): void
   ctx.fillRect(left, piece.trackEdgeY - 4, width, 4);
 }
 
-// A tall observation tower with windows, placed along the right straight.
+// A long two-story observation building with a railed viewing deck, more
+// like a real trackside race control/media center than a narrow tower -
+// runs along the straight the same way the grandstands and pit building do.
 function renderObservationBuilding(ctx: CanvasRenderingContext2D, piece: TowerPiece): void {
   const x = piece.trackEdgeX;
-  const y = piece.centerY - TOWER_HEIGHT / 2;
+  const length = piece.length;
+  const yTop = piece.centerY - length / 2;
 
-  ctx.fillStyle = '#4a4a5a';
-  ctx.fillRect(x, y, TOWER_WIDTH, TOWER_HEIGHT);
-
+  // Roof, slightly overhanging the two-story body
   ctx.fillStyle = '#333';
-  ctx.fillRect(x - 6, y - 10, TOWER_WIDTH + 12, 10);
+  ctx.fillRect(x - 4, yTop - 4, OBS_WIDTH + 8, length + 8);
 
+  // Two-story body
+  ctx.fillStyle = '#4a4a5a';
+  ctx.fillRect(x, yTop, OBS_WIDTH, length);
+
+  // Floor divider, splitting the body into two stories across its width
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + OBS_WIDTH / 2, yTop);
+  ctx.lineTo(x + OBS_WIDTH / 2, yTop + length);
+  ctx.stroke();
+
+  // A column of windows per floor, running the building's length
   ctx.fillStyle = '#a8d8ff';
-  for (let wy = y + 10; wy < y + TOWER_HEIGHT - 10; wy += 16) {
-    for (let wx = x + 6; wx < x + TOWER_WIDTH - 6; wx += 14) {
-      ctx.fillRect(wx, wy, 8, 10);
+  for (let floor = 0; floor < 2; floor++) {
+    const wx = x + 6 + floor * (OBS_WIDTH / 2);
+    for (let wy = yTop + 8; wy < yTop + length - 8; wy += 15) {
+      ctx.fillRect(wx, wy, OBS_WIDTH / 2 - 12, 9);
     }
   }
 
+  // Railed viewing deck at the track-facing end
+  const deckDepth = 14;
+  ctx.fillStyle = '#666';
+  ctx.fillRect(x - 6, yTop - deckDepth - 2, OBS_WIDTH + 12, deckDepth);
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  for (let dx = x - 4; dx < x + OBS_WIDTH + 4; dx += 6) {
+    ctx.beginPath();
+    ctx.moveTo(dx, yTop - deckDepth - 2);
+    ctx.lineTo(dx, yTop - 4);
+    ctx.stroke();
+  }
+
+  // Antenna
   ctx.strokeStyle = '#888';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x + TOWER_WIDTH / 2, y - 10);
-  ctx.lineTo(x + TOWER_WIDTH / 2, y - 26);
+  ctx.moveTo(x + OBS_WIDTH / 2, yTop - deckDepth - 2);
+  ctx.lineTo(x + OBS_WIDTH / 2, yTop - deckDepth - 20);
   ctx.stroke();
 }
 
@@ -277,11 +291,11 @@ export function getSceneryObstacles(track: TrackDefinition): Obstacle[] {
     }
 
     return {
-      cx: piece.trackEdgeX + TOWER_WIDTH / 2,
+      cx: piece.trackEdgeX + OBS_WIDTH / 2,
       cy: piece.centerY,
       angle: 0,
-      halfLength: TOWER_WIDTH / 2,
-      halfWidth: TOWER_HEIGHT / 2,
+      halfLength: OBS_WIDTH / 2,
+      halfWidth: piece.length / 2,
     };
   });
 }

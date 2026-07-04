@@ -10,9 +10,10 @@ const MAX_VIEW_DISTANCE = 420;
 const PERSPECTIVE_K = 190;
 const HORIZON_Y_FRACTION = 0.38;
 const MAX_PROJECTED_POINTS = 50;
-// The literal track width read as too narrow to track your position by -
-// this deliberately exaggerates it for legibility over strict accuracy.
-const WIDTH_EXAGGERATION = 1.4;
+// The literal track width read as too narrow to drive by comfortably in
+// this view - deliberately exaggerated well past strict accuracy so the
+// road is genuinely easy to track visually, not just technically visible.
+const WIDTH_EXAGGERATION = 1.75;
 
 interface ProjectedPoint {
   screenX: number;
@@ -199,7 +200,10 @@ function renderMiniMap(
   const mapWidth = 170;
   const mapHeight = 120;
   const mapX = canvas.width - mapWidth - 16;
-  const mapY = 16;
+  // Below the [G]/[V]/[ESC] buttons (main.ts draws them at y=8, height=26)
+  // rather than overlapping them - the two were fighting for the same
+  // top-right corner before.
+  const mapY = 44;
   const padding = 10;
 
   const xs = track.centerline.map((p) => p.x);

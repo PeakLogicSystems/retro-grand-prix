@@ -10,11 +10,11 @@ import { resolveObstacleCollisions, type Obstacle } from './game/collision';
 import { renderCockpitView } from './game/cockpitView';
 import { renderTrackSelectMenu } from './game/menu';
 import { sampleGhostAt, type GhostFrame } from './game/ghost';
-import { loadBestTimes, saveBestTime, loadGhost, saveGhost } from './game/storage';
+import { loadBestTimes, saveBestTime, loadGhost, saveGhost, clearBest } from './game/storage';
 import { SoundEngine } from './game/audio';
 
 // Mirrors Car's private maxSpeed - used only to normalize engine pitch/volume.
-const APPROX_TOP_SPEED = 260;
+const APPROX_TOP_SPEED = 225;
 
 type ViewMode = 'overhead' | 'cockpit';
 
@@ -45,6 +45,53 @@ function angleDiffDegrees(a: number, b: number): number {
   return (diff * 180) / Math.PI;
 }
 
+// Real clickable UI buttons (not just hint text) - computed fresh from the
+// current session each time by both the renderer and the click handler, so
+// their positions/labels can never drift out of sync with each other.
+interface UiButton {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+}
+
+function getRaceButtons(session: RaceSession, canvas: HTMLCanvasElement): UiButton[] {
+  const y = 8;
+  const height = 26;
+  const gap = 8;
+
+  const menu: UiButton = { x: canvas.width - 10 - 100, y, width: 100, height, label: '[ESC] MENU' };
+  const view: UiButton = { x: menu.x - gap - 90, y, width: 90, height, label: '[V] VIEW' };
+  const ghost: UiButton = {
+    x: view.x - gap - 140,
+    y,
+    width: 140,
+    height,
+    label: `[G] GHOST: ${session.ghostVisible ? 'ON' : 'OFF'}`,
+  };
+
+  return [ghost, view, menu];
+}
+
+function pointInButton(x: number, y: number, b: UiButton): boolean {
+  return x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height;
+}
+
+function renderButton(ctx: CanvasRenderingContext2D, b: UiButton): void {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(b.x, b.y, b.width, b.height);
+  ctx.strokeStyle = '#ffe066';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(b.x, b.y, b.width, b.height);
+  ctx.fillStyle = '#ffe066';
+  ctx.font = 'bold 13px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(b.label, b.x + b.width / 2, b.y + b.height / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+}
+
 // Everything that belongs to one specific track attempt - rebuilt from
 // scratch each time a track is (re)selected, rather than mutating shared
 // state, so leftover state from a previous track can't leak into the next.
@@ -57,6 +104,7 @@ interface RaceSession {
   crashFlashTimer: number;
   viewMode: ViewMode;
   ghost: GhostFrame[] | null; // best lap recorded so far (this session or a previous one)
+  ghostVisible: boolean;
   recording: GhostFrame[]; // frames captured during the lap currently in progress
 }
 
@@ -71,6 +119,7 @@ function createRaceSession(track: TrackDefinition): RaceSession {
     crashFlashTimer: 0,
     viewMode: 'overhead',
     ghost: loadGhost(track.name),
+    ghostVisible: true,
     recording: [],
   };
 }
@@ -90,13 +139,37 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   let hasFocus = false;
   canvas.addEventListener('focus', () => (hasFocus = true));
   canvas.addEventListener('blur', () => (hasFocus = false));
-  canvas.addEventListener('click', () => {
-    canvas.focus();
-    sound.resume();
-  });
   canvas.focus();
 
   let state: GameState = { kind: 'menu', selectedIndex: 0 };
+
+  // Clicking anywhere focuses/unlocks audio as before, but a click landing
+  // on one of the on-screen buttons also performs that button's action
+  // directly - real clickable controls, not just keyboard-shortcut hints.
+  canvas.addEventListener('click', (e) => {
+    canvas.focus();
+    sound.resume();
+
+    if (state.kind !== 'race') return;
+    const session = state.session;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = ((e.clientX - rect.left) * canvas.width) / rect.width;
+    const clickY = ((e.clientY - rect.top) * canvas.height) / rect.height;
+
+    const [ghostBtn, viewBtn, menuBtn] = getRaceButtons(session, canvas);
+    if (pointInButton(clickX, clickY, viewBtn)) {
+      session.viewMode = session.viewMode === 'overhead' ? 'cockpit' : 'overhead';
+      sound.playMenuMove();
+    } else if (pointInButton(clickX, clickY, menuBtn)) {
+      const returnIndex = tracks.indexOf(session.track);
+      state = { kind: 'menu', selectedIndex: returnIndex < 0 ? 0 : returnIndex };
+      sound.playMenuSelect();
+    } else if (pointInButton(clickX, clickY, ghostBtn)) {
+      session.ghostVisible = !session.ghostVisible;
+      sound.playMenuMove();
+    }
+  });
 
   startGameLoop(
     (dt) => {
@@ -111,6 +184,10 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
           state.selectedIndex = (state.selectedIndex + 1) % tracks.length;
           sound.playMenuMove();
         }
+        if (input.consumePress('KeyR')) {
+          clearBest(tracks[state.selectedIndex].name);
+          sound.playCrash();
+        }
         if (input.consumePress('Enter') || input.consumePress('Space')) {
           sound.playMenuSelect();
           state = { kind: 'race', session: createRaceSession(tracks[state.selectedIndex]) };
@@ -119,6 +196,10 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       }
 
       const session = state.session;
+
+      if (input.consumePress('KeyG')) {
+        session.ghostVisible = !session.ghostVisible;
+      }
 
       if (input.consumePress('Escape')) {
         const returnIndex = tracks.indexOf(session.track);
@@ -196,7 +277,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         // elapsed time - not implemented for cockpit view yet (would need
         // to project the ghost through the same perspective math as the
         // road), so it only appears in overhead view for now.
-        if (session.ghost) {
+        if (session.ghost && session.ghostVisible) {
           const ghostPos = sampleGhostAt(session.ghost, session.lapTracker.currentLapTime);
           if (ghostPos) renderGhostCar(ctx, ghostPos.x, ghostPos.y, ghostPos.angle);
         }
@@ -206,10 +287,10 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         renderCockpitView(ctx, canvas, session.track, session.car);
       }
 
-      ctx.fillStyle = '#ffe066';
-      ctx.font = 'bold 16px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('[V] view   [ESC] menu', canvas.width - 10, 24);
+      for (const button of getRaceButtons(session, canvas)) {
+        renderButton(ctx, button);
+      }
+
       ctx.fillStyle = '#0f0';
       ctx.font = '14px monospace';
       ctx.textAlign = 'left';
