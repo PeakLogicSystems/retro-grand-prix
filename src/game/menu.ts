@@ -1,6 +1,12 @@
 import type { TrackDefinition } from './track';
 import { getStandings, getTotalPoints } from './championship';
 
+// Shared with getMenuEntryIndexAt below, so a tap always lands on the same
+// row the renderer drew it at - the same "one layout, two consumers"
+// pattern used for the race-view buttons in main.ts.
+export const MENU_START_Y = 200;
+export const MENU_LINE_HEIGHT = 55;
+
 export function renderTrackSelectMenu(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
@@ -19,13 +25,13 @@ export function renderTrackSelectMenu(
   ctx.fillStyle = '#aaa';
   ctx.font = '20px monospace';
   ctx.fillText('Select a track', canvas.width / 2, 135);
+  ctx.font = '14px monospace';
+  ctx.fillText('(tap a track to play, or use Up/Down + Enter)', canvas.width / 2, 158);
 
   const standings = getStandings(tracks);
 
-  const startY = 200;
-  const lineHeight = 55;
   standings.forEach((entry, i) => {
-    const y = startY + i * lineHeight;
+    const y = MENU_START_Y + i * MENU_LINE_HEIGHT;
     const selected = i === selectedIndex;
 
     ctx.fillStyle = selected ? '#4fc3f7' : '#888';
@@ -47,4 +53,18 @@ export function renderTrackSelectMenu(
   ctx.fillText('Up/Down or W/S to choose - Enter or Space to start', canvas.width / 2, canvas.height - 60);
   ctx.fillStyle = '#a55';
   ctx.fillText('[R] reset best time + ghost for selected track', canvas.width / 2, canvas.height - 38);
+}
+
+// Which track entry (if any) a tap/click at height y landed on - hit zones
+// span the row's full height regardless of x, since a mobile list tap
+// doesn't need horizontal precision. For touch devices, tapping a specific
+// row directly is natural and there's no need to make the player navigate
+// there with arrow keys first.
+export function getMenuEntryIndexAt(y: number, numEntries: number): number | null {
+  for (let i = 0; i < numEntries; i++) {
+    const centerY = MENU_START_Y + i * MENU_LINE_HEIGHT;
+    const halfHeight = MENU_LINE_HEIGHT / 2 - 4;
+    if (y >= centerY - halfHeight && y <= centerY + halfHeight) return i;
+  }
+  return null;
 }

@@ -8,10 +8,11 @@ import { LapTracker } from './game/lapTracker';
 import { renderTrackScenery, getSceneryObstacles, getSCurveGuardrailObstacles } from './game/scenery';
 import { resolveObstacleCollisions, type Obstacle } from './game/collision';
 import { renderCockpitView } from './game/cockpitView';
-import { renderTrackSelectMenu } from './game/menu';
+import { renderTrackSelectMenu, getMenuEntryIndexAt } from './game/menu';
 import { sampleGhostAt, type GhostFrame } from './game/ghost';
 import { loadBestTimes, saveBestTime, loadGhost, saveGhost, clearBest } from './game/storage';
 import { SoundEngine } from './game/audio';
+import { TouchDriveControls, getTouchControlLayout, renderTouchControls } from './game/touchControls';
 
 // Mirrors Car's private maxSpeed - used only to normalize engine pitch/volume.
 const APPROX_TOP_SPEED = 225;
@@ -159,16 +160,29 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
   // Clicking anywhere focuses/unlocks audio as before, but a click landing
   // on one of the on-screen buttons also performs that button's action
   // directly - real clickable controls, not just keyboard-shortcut hints.
+  // This also fires for a tablet tap (browsers synthesize a click after a
+  // touch), which is what makes the menu touch-selectable.
   canvas.addEventListener('click', (e) => {
     canvas.focus();
     sound.resume();
 
-    if (state.kind !== 'race') return;
-    const session = state.session;
-
     const rect = canvas.getBoundingClientRect();
     const clickX = ((e.clientX - rect.left) * canvas.width) / rect.width;
     const clickY = ((e.clientY - rect.top) * canvas.height) / rect.height;
+
+    if (state.kind === 'menu') {
+      // Tapping a track directly selects and starts it - on a touchscreen
+      // there's no reason to make the player step there with arrow keys
+      // first when they can just tap the row they want.
+      const index = getMenuEntryIndexAt(clickY, tracks.length);
+      if (index !== null) {
+        sound.playMenuSelect();
+        state = { kind: 'race', session: createRaceSession(tracks[index]) };
+      }
+      return;
+    }
+
+    const session = state.session;
 
     const [viewBtn, menuBtn] = getRaceButtons(canvas);
     if (pointInButton(clickX, clickY, viewBtn)) {
@@ -183,6 +197,12 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       sound.playMenuMove();
     }
   });
+
+  // Steering buttons on the left, throttle/brake on the right - see
+  // touchControls.ts. The layout is only meaningful during a race, but
+  // computing it fresh from the current canvas size on every check (rather
+  // than caching) means it can never go stale if the canvas is resized.
+  const touchControls = new TouchDriveControls(canvas, () => getTouchControlLayout(canvas));
 
   startGameLoop(
     (dt) => {
@@ -228,10 +248,10 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
       session.car.update(
         dt,
         {
-          forward: input.isDown('ArrowUp') || input.isDown('KeyW'),
-          backward: input.isDown('ArrowDown') || input.isDown('KeyS'),
-          left: input.isDown('ArrowLeft') || input.isDown('KeyA'),
-          right: input.isDown('ArrowRight') || input.isDown('KeyD'),
+          forward: input.isDown('ArrowUp') || input.isDown('KeyW') || touchControls.forward,
+          backward: input.isDown('ArrowDown') || input.isDown('KeyS') || touchControls.backward,
+          left: input.isDown('ArrowLeft') || input.isDown('KeyA') || touchControls.left,
+          right: input.isDown('ArrowRight') || input.isDown('KeyD') || touchControls.right,
         },
         grip
       );
@@ -326,6 +346,7 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         140
       );
       renderButton(ctx, getGhostButton(session, canvas));
+      renderTouchControls(ctx, getTouchControlLayout(canvas), touchControls.activeZones());
 
       if (session.crashFlashTimer > 0) {
         ctx.fillStyle = `rgba(255, 0, 0, ${(session.crashFlashTimer / 0.6) * 0.5})`;
