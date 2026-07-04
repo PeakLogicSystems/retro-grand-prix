@@ -1,4 +1,4 @@
-import type { TrackDefinition } from './track';
+import type { TrackDefinition, Point } from './track';
 import type { Obstacle } from './collision';
 
 const CROWD_COLORS = ['#f2c14e', '#f25c5c', '#5cc2f2', '#8ef25c', '#f2f2f2', '#c78ef2'];
@@ -323,6 +323,10 @@ function renderPitLaneMarkings(ctx: CanvasRenderingContext2D, piece: PitPiece): 
   renderPitRamp(ctx, right, apronY, trackEdgeY, laneHalf, 1, 'PIT OUT');
 }
 
+// An S-shaped ramp (ease-in/ease-out via a raised cosine) rather than a
+// straight taper, so its tangent is horizontal at both the pit-lane end and
+// the main-track end - a real smooth merge instead of meeting the track at
+// a sharp angle.
 function renderPitRamp(
   ctx: CanvasRenderingContext2D,
   laneEndX: number,
@@ -332,16 +336,32 @@ function renderPitRamp(
   direction: 1 | -1,
   label: string
 ): void {
-  const rampLength = 40;
+  const rampLength = 44;
   const farX = laneEndX + direction * rampLength;
   const farHalf = laneHalf * 1.8; // flares wider where it meets the main track
+  const steps = 16;
+
+  const ease = (t: number): number => (1 - Math.cos(Math.PI * t)) / 2;
+  const centerX = (t: number): number => laneEndX + (farX - laneEndX) * t;
+  const centerY = (t: number): number => apronY + (trackEdgeY - apronY) * ease(t);
+  const halfWidth = (t: number): number => laneHalf + (farHalf - laneHalf) * ease(t);
+
+  const innerEdge: Point[] = [];
+  const outerEdge: Point[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = centerX(t);
+    const cy = centerY(t);
+    const hw = halfWidth(t);
+    innerEdge.push({ x, y: cy - hw });
+    outerEdge.push({ x, y: cy + hw });
+  }
 
   ctx.fillStyle = '#3a3a3a';
   ctx.beginPath();
-  ctx.moveTo(laneEndX, apronY - laneHalf);
-  ctx.lineTo(farX, trackEdgeY - farHalf);
-  ctx.lineTo(farX, trackEdgeY + farHalf);
-  ctx.lineTo(laneEndX, apronY + laneHalf);
+  ctx.moveTo(innerEdge[0].x, innerEdge[0].y);
+  for (const p of innerEdge.slice(1)) ctx.lineTo(p.x, p.y);
+  for (let i = outerEdge.length - 1; i >= 0; i--) ctx.lineTo(outerEdge[i].x, outerEdge[i].y);
   ctx.closePath();
   ctx.fill();
 
@@ -349,17 +369,17 @@ function renderPitRamp(
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
   ctx.beginPath();
-  ctx.moveTo(laneEndX, apronY - laneHalf);
-  ctx.lineTo(farX, trackEdgeY - farHalf);
-  ctx.moveTo(laneEndX, apronY + laneHalf);
-  ctx.lineTo(farX, trackEdgeY + farHalf);
+  ctx.moveTo(innerEdge[0].x, innerEdge[0].y);
+  for (const p of innerEdge.slice(1)) ctx.lineTo(p.x, p.y);
+  ctx.moveTo(outerEdge[0].x, outerEdge[0].y);
+  for (const p of outerEdge.slice(1)) ctx.lineTo(p.x, p.y);
   ctx.stroke();
   ctx.setLineDash([]);
 
   ctx.fillStyle = '#ffe066';
   ctx.font = 'bold 8px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(label, (laneEndX + farX) / 2, (apronY + trackEdgeY) / 2 + 3);
+  ctx.fillText(label, centerX(0.5), centerY(0.5) + 3);
 }
 
 export function renderTrackScenery(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
