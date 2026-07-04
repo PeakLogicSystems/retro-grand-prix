@@ -42,6 +42,12 @@ interface PitPiece {
   centerX: number;
   trackEdgeY: number;
   width: number;
+  // How far the entry/exit taper reaches, in world units - sized per track
+  // from its own available clearance (space between the building and the
+  // corners), so a track with more room gets a longer, gentler curve and a
+  // tighter one still gets something proportionate rather than identical
+  // ramps regardless of how much space each track actually has.
+  taperLength: number;
 }
 
 interface TowerPiece {
@@ -112,11 +118,15 @@ function getSceneryPieces(track: TrackDefinition): SceneryPiece[] {
   pieces.push({ kind: 'stand', edgeX: brEdge.x, edgeY: brEdge.y, outwardAngle: br.outwardAngle, length: 130, seed: 13 });
 
   const top = track.topStraight;
+  const pitFullWidth = top.xEnd - top.xStart;
+  const pitDisplayWidth = Math.min(pitFullWidth, PIT_MAX_WIDTH);
+  const pitClearance = (pitFullWidth - pitDisplayWidth) / 2;
   pieces.push({
     kind: 'pit',
     centerX: (top.xStart + top.xEnd) / 2,
     trackEdgeY: top.y - track.width / 2 - PIT_GAP,
-    width: top.xEnd - top.xStart,
+    width: pitFullWidth,
+    taperLength: Math.max(20, Math.min(pitClearance * 0.7, 90)),
   });
 
   const right = track.rightStraight;
@@ -299,125 +309,126 @@ function renderCheckeredFlagPole(
   }
 }
 
-// A paved pit lane strip (gray, two-tone like the main road) with a
-// smoothly curved, similarly-paved ramp at each end - wide enough to read
-// as a real lane, not tapering to a point, and its outer edge lands
-// exactly on the actual track edge (sampled via actualTopEdgeYAtX, which
-// matches what's actually drawn there even on an S-curve) so it reads as
-// a continuous, natural extension of the track rather than a separate
-// patch. Visual only (not a drivable branch off the main loop yet - that
-// needs lap-validation/collision work beyond what a marking can do).
+// Matches how a real pit road entry/exit works (per reference photos): the
+// pit lane and the main track are one continuous paved surface that forks
+// apart, not two separately-bordered lanes joined by a ramp. The
+// track-facing edge follows the real (possibly S-curved) road edge at
+// every x via actualTopEdgeYAtX, so the fork is solid pavement all the way
+// - no gap, no separate lane geometry that can visually mismatch the road.
+// A single white "fork line" at each end marks the entry/exit point, the
+// same way real pit lanes paint one line at the split rather than a full
+// two-sided lane boundary. Visual only (not a drivable branch off the main
+// loop yet - that needs lap-validation/collision work beyond what a
+// marking can do).
 function renderPitLaneMarkings(ctx: CanvasRenderingContext2D, track: TrackDefinition, piece: PitPiece): void {
   const width = Math.min(piece.width, PIT_MAX_WIDTH);
   const left = piece.centerX - width / 2;
   const right = left + width;
   const apronY = piece.trackEdgeY; // near edge of the pit building, facing the track
-  const laneHalf = 20;
-
-  ctx.fillStyle = '#3a3a3a';
-  ctx.fillRect(left, apronY - laneHalf, width, laneHalf * 2);
-  ctx.fillStyle = '#4d4d4d';
-  ctx.fillRect(left, apronY - laneHalf + 4, width, laneHalf * 2 - 8);
-  ctx.strokeStyle = '#eee';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(left, apronY - laneHalf);
-  ctx.lineTo(right, apronY - laneHalf);
-  ctx.moveTo(left, apronY + laneHalf);
-  ctx.lineTo(right, apronY + laneHalf);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  renderPitRamp(ctx, track, left, apronY, laneHalf, -1, 'PIT IN');
-  renderPitRamp(ctx, track, right, apronY, laneHalf, 1, 'PIT OUT');
-}
-
-// A paved (not just painted-line) wedge curving from the lane to the
-// actual track edge, staying at least minHalfWidth wide throughout - wide
-// enough to look like a real lane a car could drive through, not a point -
-// and it *widens* toward the track (like a real highway merge lane flaring
-// out to join the road), not narrows, so the connection reads as opening
-// into the road rather than pinching down to a stub beside it.
-// The centerline eases toward a target *short* of the track edge by
-// exactly farHalf, so once that half-width is added back on, the
-// outer (track-facing) edge lands exactly on the real edge - never past
-// it, never short of it - regardless of what width the ramp is at.
-function renderPitRamp(
-  ctx: CanvasRenderingContext2D,
-  track: TrackDefinition,
-  laneEndX: number,
-  apronY: number,
-  laneHalf: number,
-  direction: 1 | -1,
-  label: string
-): void {
-  const rampLength = 44;
-  const farX = laneEndX + direction * rampLength;
-  const trackEdgeY = actualTopEdgeYAtX(track, farX);
-  const steps = 16;
-  const farHalf = laneHalf * 1.7; // flares wider where it meets the main track
-  // A few pixels of deliberate overlap into the track rather than an exact
-  // tangent point - an exact touch is one rendering/rounding quirk away
-  // from reading as a hairline gap, while a small overlap guarantees the
-  // two surfaces visibly share ground no matter what.
-  const overlap = 6;
-
-  const centerYTarget = trackEdgeY - farHalf + overlap;
-
+  const steps = 32;
+  // Sized per track from the pit piece's own available clearance (see
+  // getSceneryPieces). The curve extends *beyond* the building's own
+  // width, into the clearance space toward each corner, rather than
+  // eating into the building's frontage - so the paved lane stays the
+  // building's full width the entire way across, and only narrows down
+  // to meet the road edge past either end.
+  const taperLength = piece.taperLength;
+  const pavedLeft = left - taperLength;
+  const pavedRight = right + taperLength;
   const ease = (t: number): number => (1 - Math.cos(Math.PI * t)) / 2;
-  const centerX = (t: number): number => laneEndX + (farX - laneEndX) * t;
-  const centerY = (t: number): number => apronY + (centerYTarget - apronY) * ease(t);
-  const halfWidth = (t: number): number => laneHalf + (farHalf - laneHalf) * ease(t);
 
-  const innerEdge: Point[] = [];
-  const outerEdge: Point[] = [];
-  const innerEdgeInset: Point[] = [];
-  const outerEdgeInset: Point[] = [];
-  const stripeInset = 4; // matches the main track's dark-border/light-center treatment
+  const topEdge: Point[] = [];
+  const roadEdge: Point[] = [];
   for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const x = centerX(t);
-    const cy = centerY(t);
-    const hw = halfWidth(t);
-    innerEdge.push({ x, y: cy - hw });
-    outerEdge.push({ x, y: cy + hw });
-    const hwInset = Math.max(0, hw - stripeInset);
-    innerEdgeInset.push({ x, y: cy - hwInset });
-    outerEdgeInset.push({ x, y: cy + hwInset });
+    const x = pavedLeft + ((pavedRight - pavedLeft) * i) / steps;
+    const edgeY = actualTopEdgeYAtX(track, x);
+    let topY = apronY;
+    if (x < left) {
+      topY = edgeY + (apronY - edgeY) * ease((x - pavedLeft) / taperLength);
+    } else if (x > right) {
+      topY = edgeY + (apronY - edgeY) * ease((pavedRight - x) / taperLength);
+    }
+    topEdge.push({ x, y: topY });
+    roadEdge.push({ x, y: edgeY });
   }
 
   ctx.fillStyle = '#3a3a3a';
   ctx.beginPath();
-  ctx.moveTo(innerEdge[0].x, innerEdge[0].y);
-  for (const p of innerEdge.slice(1)) ctx.lineTo(p.x, p.y);
-  for (let i = outerEdge.length - 1; i >= 0; i--) ctx.lineTo(outerEdge[i].x, outerEdge[i].y);
+  ctx.moveTo(topEdge[0].x, topEdge[0].y);
+  for (const p of topEdge.slice(1)) ctx.lineTo(p.x, p.y);
+  for (let i = roadEdge.length - 1; i >= 0; i--) ctx.lineTo(roadEdge[i].x, roadEdge[i].y);
   ctx.closePath();
   ctx.fill();
 
+  // Lighter center stripe, like the main track's two-tone road surface.
+  const inset = 5;
   ctx.fillStyle = '#4d4d4d';
   ctx.beginPath();
-  ctx.moveTo(innerEdgeInset[0].x, innerEdgeInset[0].y);
-  for (const p of innerEdgeInset.slice(1)) ctx.lineTo(p.x, p.y);
-  for (let i = outerEdgeInset.length - 1; i >= 0; i--) ctx.lineTo(outerEdgeInset[i].x, outerEdgeInset[i].y);
+  ctx.moveTo(topEdge[0].x, topEdge[0].y + inset);
+  for (const p of topEdge.slice(1)) ctx.lineTo(p.x, p.y + inset);
+  for (let i = roadEdge.length - 1; i >= 0; i--) ctx.lineTo(roadEdge[i].x, roadEdge[i].y - inset);
   ctx.closePath();
   ctx.fill();
 
-  ctx.strokeStyle = '#eee';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(innerEdge[0].x, innerEdge[0].y);
-  for (const p of innerEdge.slice(1)) ctx.lineTo(p.x, p.y);
-  ctx.moveTo(outerEdge[0].x, outerEdge[0].y);
-  for (const p of outerEdge.slice(1)) ctx.lineTo(p.x, p.y);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Guardrail only along the curved taper sections (not the flat middle,
+  // where it would just run parallel to and duplicate the two-tone
+  // stripe's own edge a few pixels away) - same style as the S-curve
+  // guardrails elsewhere, framing just the merge curves.
+  const leftCurve = topEdge.filter((p) => p.x <= left);
+  const rightCurve = topEdge.filter((p) => p.x >= right);
+  for (const curve of [leftCurve, rightCurve]) {
+    if (curve.length < 2) continue;
+    ctx.strokeStyle = '#ddd';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(curve[0].x, curve[0].y);
+    for (const p of curve.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < curve.length; i += 3) {
+      const prev = curve[Math.max(0, i - 1)];
+      const next = curve[Math.min(curve.length - 1, i + 1)];
+      const dx = next.x - prev.x;
+      const dy = next.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = (-dy / len) * 5;
+      const ny = (dx / len) * 5;
+      ctx.beginPath();
+      ctx.moveTo(curve[i].x - nx, curve[i].y - ny);
+      ctx.lineTo(curve[i].x + nx, curve[i].y + ny);
+      ctx.stroke();
+    }
+  }
 
+  // Orange/white striped barrier separating the pit lane from the track,
+  // only along the flat section in front of the building - not extending
+  // into the entry/exit curves, where a barrier would block the merge
+  // itself. Short alternating-color segments at a fixed physical length
+  // (independent of the coarse sampling grid), the same hazard-stripe look
+  // as a real pit wall.
+  const stripeLength = 8;
+  const flatSpan = right - left;
+  const numStripes = Math.max(1, Math.round(flatSpan / stripeLength));
+  for (let i = 0; i < numStripes; i++) {
+    const x0 = left + (flatSpan * i) / numStripes;
+    const x1 = left + (flatSpan * (i + 1)) / numStripes;
+    ctx.strokeStyle = i % 2 === 0 ? '#e67e22' : '#eee';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(x0, actualTopEdgeYAtX(track, x0));
+    ctx.lineTo(x1, actualTopEdgeYAtX(track, x1));
+    ctx.stroke();
+  }
+
+  // Labels only - the guardrail curves above already mark the entry/exit
+  // shape, so a separate fork line here was just a redundant second line
+  // tracing nearly the same path.
   ctx.fillStyle = '#ffe066';
   ctx.font = 'bold 8px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(label, centerX(0.5), centerY(0.5) + 3);
+  ctx.fillText('PIT IN', left, apronY - 8);
+  ctx.fillText('PIT OUT', right, apronY - 8);
 }
 
 export function renderTrackScenery(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
