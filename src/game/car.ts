@@ -122,37 +122,67 @@ export class Car {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.angle);
-
-    const length = 24;
-    const width = 12;
-
-    ctx.fillStyle = '#4fc3f7';
-    ctx.fillRect(-length / 2, -width / 2, length, width);
-
-    // White nose marker so facing direction is visible at a glance
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(length / 2 - 4, -width / 2, 4, width);
-
-    ctx.restore();
+    renderF1Silhouette(ctx, this.x, this.y, this.angle, '#4fc3f7');
   }
+}
+
+// A top-down F1-style silhouette: pointed nose, bulging side pods, tapered
+// tail, and separate front/rear wings - drawn once and shared by both the
+// player's car and its ghost, so the two always look alike.
+function renderF1Silhouette(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  angle: number,
+  bodyColor: string
+): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  // Body outline, nose at +x - traced as one half then mirrored for symmetry.
+  const upperProfile: [number, number][] = [
+    [12, 0],
+    [9, 2],
+    [6, 2.5],
+    [2, 5],
+    [-4, 5.5],
+    [-9, 3],
+    [-12, 2.5],
+  ];
+
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.moveTo(upperProfile[0][0], upperProfile[0][1]);
+  for (const [px, py] of upperProfile.slice(1)) ctx.lineTo(px, py);
+  for (const [px, py] of [...upperProfile].reverse()) ctx.lineTo(px, -py);
+  ctx.closePath();
+  ctx.fill();
+
+  // Front and rear wings - thin bars wider than the body
+  ctx.fillStyle = '#222';
+  ctx.fillRect(10, -6, 2, 12);
+  ctx.fillRect(-12, -7, 2, 14);
+
+  // Cockpit opening, with the driver's white helmet visible inside it
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.ellipse(1, 0, 2.5, 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.ellipse(1, 0, 1.3, 1.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
 // Same silhouette as Car.render, but translucent and colorless - for
 // drawing the ghost of the player's own best lap alongside the real car.
 export function renderGhostCar(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number): void {
   ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
   ctx.globalAlpha = 0.35;
-
-  const length = 24;
-  const width = 12;
-
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(-length / 2, -width / 2, length, width);
-
+  renderF1Silhouette(ctx, x, y, angle, '#fff');
   ctx.restore();
 }

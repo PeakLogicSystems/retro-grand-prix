@@ -1,6 +1,7 @@
 import type { TrackDefinition } from './track';
 import { findNearestPointIndex } from './track';
 import type { Car } from './car';
+import { getCockpitBillboards } from './scenery';
 
 const MAX_VIEW_DISTANCE = 420;
 // Controls how quickly things shrink with distance - smaller = faster
@@ -187,6 +188,58 @@ function renderRoad(ctx: CanvasRenderingContext2D, projected: ProjectedPoint[]):
   }
 }
 
+// Renders each scenery piece (grandstands, pit building, tower) as a flat
+// sprite scaled/positioned by the same perspective-divide math as the road
+// - the classic Out Run trick for roadside objects, not true 3D. Without
+// this, the cockpit view showed nothing but road and empty green.
+function renderCockpitScenery(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  horizonY: number,
+  track: TrackDefinition,
+  car: Car
+): void {
+  const headingX = Math.cos(car.angle);
+  const headingY = Math.sin(car.angle);
+  const rightX = -Math.sin(car.angle);
+  const rightY = Math.cos(car.angle);
+
+  interface Sprite {
+    forwardDist: number;
+    screenX: number;
+    groundY: number;
+    width: number;
+    height: number;
+    color: string;
+  }
+
+  const sprites: Sprite[] = [];
+  for (const b of getCockpitBillboards(track)) {
+    const dx = b.x - car.x;
+    const dy = b.y - car.y;
+    const forwardDist = dx * headingX + dy * headingY;
+    const lateralDist = dx * rightX + dy * rightY;
+    if (forwardDist < 5 || forwardDist > MAX_VIEW_DISTANCE) continue;
+
+    const scale = PERSPECTIVE_K / (PERSPECTIVE_K + forwardDist);
+    sprites.push({
+      forwardDist,
+      screenX: canvas.width / 2 + lateralDist * scale,
+      groundY: horizonY + scale * (canvas.height - horizonY),
+      width: b.footprintWidth * scale,
+      height: b.height * scale,
+      color: b.color,
+    });
+  }
+
+  // Farthest first, so nearer buildings correctly draw over farther ones.
+  sprites.sort((a, b) => b.forwardDist - a.forwardDist);
+  for (const s of sprites) {
+    ctx.fillStyle = s.color;
+    ctx.fillRect(s.screenX - s.width / 2, s.groundY - s.height, s.width, s.height);
+  }
+}
+
 // Small overhead schematic of the whole track with a dot for the car's
 // current position and heading - the pseudo-3D forward view alone doesn't
 // tell you where you are on the circuit, so this fills that gap directly
@@ -348,6 +401,7 @@ export function renderCockpitView(
   const projected = projectRoadAhead(canvas, horizonY, track, car);
 
   renderGround(ctx, canvas, projected);
+  renderCockpitScenery(ctx, canvas, horizonY, track, car);
   renderRoad(ctx, projected);
   renderDashboard(ctx, canvas);
   renderMiniMap(ctx, canvas, track, car);

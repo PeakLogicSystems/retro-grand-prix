@@ -1,4 +1,5 @@
 import type { TrackDefinition, Point } from './track';
+import { centerlineYAtX } from './track';
 import type { Obstacle } from './collision';
 
 const CROWD_COLORS = ['#f2c14e', '#f25c5c', '#5cc2f2', '#8ef25c', '#f2f2f2', '#c78ef2'];
@@ -72,6 +73,15 @@ function localToWorld(
     x: originX + localX * Math.cos(angle) - localY * Math.sin(angle),
     y: originY + localX * Math.sin(angle) + localY * Math.cos(angle),
   };
+}
+
+// The top straight's *actual* road edge at a given x - reads the real
+// rendered centerline (via the exact same linear interpolation the canvas
+// stroke uses between points) rather than recomputing the S-curve formula
+// separately, which could subtly mismatch the drawn polyline. Whatever the
+// road actually does at this x, this matches it exactly.
+function actualTopEdgeYAtX(track: TrackDefinition, x: number): number {
+  return centerlineYAtX(track, x, track.topStraight.y) - track.width / 2;
 }
 
 function getSceneryPieces(track: TrackDefinition): SceneryPiece[] {
@@ -289,22 +299,25 @@ function renderCheckeredFlagPole(
   }
 }
 
-// A continuous pit lane strip running the length of the building (where
-// cars would drive past the garages), with a smoothly-tapered on-ramp and
-// off-ramp at either end merging into the main track edge - like a real
-// highway ramp widening to meet the road, not just a floating diagonal
-// patch. Visual only for now (not a drivable branch off the main loop yet;
-// that needs lap-validation/collision work beyond what a marking can do).
-function renderPitLaneMarkings(ctx: CanvasRenderingContext2D, piece: PitPiece): void {
+// A paved pit lane strip (gray, two-tone like the main road) with a
+// smoothly curved, similarly-paved ramp at each end - wide enough to read
+// as a real lane, not tapering to a point, and its outer edge lands
+// exactly on the actual track edge (sampled via actualTopEdgeYAtX, which
+// matches what's actually drawn there even on an S-curve) so it reads as
+// a continuous, natural extension of the track rather than a separate
+// patch. Visual only (not a drivable branch off the main loop yet - that
+// needs lap-validation/collision work beyond what a marking can do).
+function renderPitLaneMarkings(ctx: CanvasRenderingContext2D, track: TrackDefinition, piece: PitPiece): void {
   const width = Math.min(piece.width, PIT_MAX_WIDTH);
   const left = piece.centerX - width / 2;
   const right = left + width;
   const apronY = piece.trackEdgeY; // near edge of the pit building, facing the track
-  const trackEdgeY = apronY + PIT_GAP; // the actual track's outer edge
-  const laneHalf = 14;
+  const laneHalf = 20;
 
   ctx.fillStyle = '#3a3a3a';
   ctx.fillRect(left, apronY - laneHalf, width, laneHalf * 2);
+  ctx.fillStyle = '#4d4d4d';
+  ctx.fillRect(left, apronY - laneHalf + 4, width, laneHalf * 2 - 8);
   ctx.strokeStyle = '#eee';
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
@@ -316,38 +329,52 @@ function renderPitLaneMarkings(ctx: CanvasRenderingContext2D, piece: PitPiece): 
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Mirror images of each other (direction flips which way the ramp flares
-  // out), so the exit is a proper reflection of the entry, not a
-  // differently-shaped patch.
-  renderPitRamp(ctx, left, apronY, trackEdgeY, laneHalf, -1, 'PIT IN');
-  renderPitRamp(ctx, right, apronY, trackEdgeY, laneHalf, 1, 'PIT OUT');
+  renderPitRamp(ctx, track, left, apronY, laneHalf, -1, 'PIT IN');
+  renderPitRamp(ctx, track, right, apronY, laneHalf, 1, 'PIT OUT');
 }
 
-// An S-shaped ramp (ease-in/ease-out via a raised cosine) rather than a
-// straight taper, so its tangent is horizontal at both the pit-lane end and
-// the main-track end - a real smooth merge instead of meeting the track at
-// a sharp angle.
+// A paved (not just painted-line) wedge curving from the lane to the
+// actual track edge, staying at least minHalfWidth wide throughout - wide
+// enough to look like a real lane a car could drive through, not a point -
+// and it *widens* toward the track (like a real highway merge lane flaring
+// out to join the road), not narrows, so the connection reads as opening
+// into the road rather than pinching down to a stub beside it.
+// The centerline eases toward a target *short* of the track edge by
+// exactly farHalf, so once that half-width is added back on, the
+// outer (track-facing) edge lands exactly on the real edge - never past
+// it, never short of it - regardless of what width the ramp is at.
 function renderPitRamp(
   ctx: CanvasRenderingContext2D,
+  track: TrackDefinition,
   laneEndX: number,
   apronY: number,
-  trackEdgeY: number,
   laneHalf: number,
   direction: 1 | -1,
   label: string
 ): void {
   const rampLength = 44;
   const farX = laneEndX + direction * rampLength;
-  const farHalf = laneHalf * 1.8; // flares wider where it meets the main track
+  const trackEdgeY = actualTopEdgeYAtX(track, farX);
   const steps = 16;
+  const farHalf = laneHalf * 1.7; // flares wider where it meets the main track
+  // A few pixels of deliberate overlap into the track rather than an exact
+  // tangent point - an exact touch is one rendering/rounding quirk away
+  // from reading as a hairline gap, while a small overlap guarantees the
+  // two surfaces visibly share ground no matter what.
+  const overlap = 6;
+
+  const centerYTarget = trackEdgeY - farHalf + overlap;
 
   const ease = (t: number): number => (1 - Math.cos(Math.PI * t)) / 2;
   const centerX = (t: number): number => laneEndX + (farX - laneEndX) * t;
-  const centerY = (t: number): number => apronY + (trackEdgeY - apronY) * ease(t);
+  const centerY = (t: number): number => apronY + (centerYTarget - apronY) * ease(t);
   const halfWidth = (t: number): number => laneHalf + (farHalf - laneHalf) * ease(t);
 
   const innerEdge: Point[] = [];
   const outerEdge: Point[] = [];
+  const innerEdgeInset: Point[] = [];
+  const outerEdgeInset: Point[] = [];
+  const stripeInset = 4; // matches the main track's dark-border/light-center treatment
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const x = centerX(t);
@@ -355,6 +382,9 @@ function renderPitRamp(
     const hw = halfWidth(t);
     innerEdge.push({ x, y: cy - hw });
     outerEdge.push({ x, y: cy + hw });
+    const hwInset = Math.max(0, hw - stripeInset);
+    innerEdgeInset.push({ x, y: cy - hwInset });
+    outerEdgeInset.push({ x, y: cy + hwInset });
   }
 
   ctx.fillStyle = '#3a3a3a';
@@ -362,6 +392,14 @@ function renderPitRamp(
   ctx.moveTo(innerEdge[0].x, innerEdge[0].y);
   for (const p of innerEdge.slice(1)) ctx.lineTo(p.x, p.y);
   for (let i = outerEdge.length - 1; i >= 0; i--) ctx.lineTo(outerEdge[i].x, outerEdge[i].y);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#4d4d4d';
+  ctx.beginPath();
+  ctx.moveTo(innerEdgeInset[0].x, innerEdgeInset[0].y);
+  for (const p of innerEdgeInset.slice(1)) ctx.lineTo(p.x, p.y);
+  for (let i = outerEdgeInset.length - 1; i >= 0; i--) ctx.lineTo(outerEdgeInset[i].x, outerEdgeInset[i].y);
   ctx.closePath();
   ctx.fill();
 
@@ -386,7 +424,7 @@ export function renderTrackScenery(ctx: CanvasRenderingContext2D, track: TrackDe
   for (const piece of getSceneryPieces(track)) {
     if (piece.kind === 'stand') renderGrandstand(ctx, piece);
     else if (piece.kind === 'pit') {
-      renderPitLaneMarkings(ctx, piece);
+      renderPitLaneMarkings(ctx, track, piece);
       renderPitBuilding(ctx, piece);
     } else renderObservationBuilding(ctx, piece);
   }
@@ -451,4 +489,46 @@ export function getSCurveGuardrailObstacles(track: TrackDefinition): Obstacle[] 
     }
   }
   return obstacles;
+}
+
+export interface CockpitBillboard {
+  x: number;
+  y: number;
+  footprintWidth: number; // real-world size used as the sprite's width
+  height: number; // real-world vertical height, purely a visual guess -
+  // the overhead game has no concept of building height, so cockpit view
+  // needs its own per-kind number here
+  color: string;
+}
+
+// A flat "billboard" stand-in for each scenery piece, positioned/sized in
+// world units - cockpitView.ts projects these through the same
+// perspective math as the road, the classic Out Run trick of drawing
+// roadside objects as flat sprites that scale with distance rather than
+// true 3D geometry.
+export function getCockpitBillboards(track: TrackDefinition): CockpitBillboard[] {
+  return getSceneryPieces(track).map((piece): CockpitBillboard => {
+    if (piece.kind === 'stand') {
+      const renderAngle = piece.outwardAngle - Math.PI / 2;
+      const center = localToWorld(piece.edgeX, piece.edgeY, renderAngle, 0, (STAND_NEAR_Y + STAND_FAR_Y) / 2);
+      return { x: center.x, y: center.y, footprintWidth: piece.length, height: 45, color: '#555' };
+    }
+    if (piece.kind === 'pit') {
+      const width = Math.min(piece.width, PIT_MAX_WIDTH);
+      return {
+        x: piece.centerX,
+        y: piece.trackEdgeY - (PIT_HEIGHT + PIT_ROOF_HEIGHT) / 2,
+        footprintWidth: width,
+        height: 60,
+        color: '#666',
+      };
+    }
+    return {
+      x: piece.trackEdgeX + (OBS_STAND_DEPTH + OBS_WIDTH) / 2,
+      y: piece.centerY,
+      footprintWidth: piece.length,
+      height: 140,
+      color: '#4a4a5a',
+    };
+  });
 }

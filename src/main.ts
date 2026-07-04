@@ -3,7 +3,7 @@ import { InputManager } from './game/input';
 import { Car, renderGhostCar } from './game/car';
 import { startGameLoop } from './game/loop';
 import { clamp } from './game/math';
-import { getAllTracks, distanceToCenterline, renderTrack, renderSCurveGuardrails, type TrackDefinition } from './game/track';
+import { getAllTracks, distanceToCenterline, renderTrack, renderSCurveGuardrails, renderCornerGravelAndCurbs, renderCheckpointFlags, type TrackDefinition } from './game/track';
 import { LapTracker } from './game/lapTracker';
 import { renderTrackScenery, getSceneryObstacles, getSCurveGuardrailObstacles } from './game/scenery';
 import { resolveObstacleCollisions, type Obstacle } from './game/collision';
@@ -284,8 +284,10 @@ function main(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): void {
         ctx.fillStyle = '#173a17';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         renderTrack(ctx, session.track);
+        renderCornerGravelAndCurbs(ctx, session.track);
         renderSCurveGuardrails(ctx, session.track);
         renderTrackScenery(ctx, session.track);
+        renderCheckpointFlags(ctx, session.track, session.lapTracker.getCheckpointStatus());
 
         // Ghost of the best lap so far, positioned by the current lap's
         // elapsed time - not implemented for cockpit view yet (would need

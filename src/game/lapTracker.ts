@@ -57,4 +57,15 @@ export class LapTracker {
     this.nextCheckpoint = (this.nextCheckpoint + 1) % this.checkpoints.length;
     return result;
   }
+
+  // One entry per non-start checkpoint (index 1..n-1), true once the car
+  // has passed it since the last start/finish crossing - resets to all
+  // false the moment a lap completes, since nextCheckpoint wraps back to 1.
+  getCheckpointStatus(): boolean[] {
+    const status: boolean[] = [];
+    for (let i = 1; i < this.checkpoints.length; i++) {
+      status.push(this.started && (this.nextCheckpoint > i || this.nextCheckpoint === 0));
+    }
+    return status;
+  }
 }

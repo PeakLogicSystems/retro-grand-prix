@@ -11,6 +11,18 @@ export interface CornerAnchor {
   outwardAngle: number; // radians, direction pointing away from the track surface
 }
 
+// The full geometry of one corner's arc - center, radius, and sweep. Unlike
+// CornerAnchor (a single point + direction, used for placing one object),
+// this is enough to trace the whole curve, needed for things that follow
+// the corner's shape along its length (gravel traps, curbing).
+export interface CornerArc {
+  cx: number;
+  cy: number;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+}
+
 export interface HorizontalStraightBounds {
   xStart: number;
   xEnd: number;
@@ -35,6 +47,9 @@ export interface TrackDefinition {
     bottomLeft: CornerAnchor;
     bottomRight: CornerAnchor;
   };
+  // All four corners' full arc geometry, for gravel traps/curbing that
+  // needs to trace the curve's shape rather than anchor a single object.
+  cornerArcs: CornerArc[];
   // Nominal (uncurved) straight positions, for scenery placement - stable
   // reference lines regardless of whether an S-curve bends the actual
   // drivable surface on that side. Deriving these from the centerline
@@ -216,6 +231,16 @@ export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackD
     outwardAngle: bottomLeftAngle,
   };
 
+  // All four corners' full arc geometry - same centers/sweeps used to
+  // generate the centerline points above, kept alongside for anything
+  // (gravel, curbing) that needs to trace the curve's shape.
+  const cornerArcs: CornerArc[] = [
+    { cx: x1 - r, cy: y0 + r, radius: r, startAngle: -Math.PI / 2, endAngle: 0 },
+    { cx: x1 - r, cy: y1 - r, radius: r, startAngle: 0, endAngle: Math.PI / 2 },
+    { cx: x0 + r, cy: y1 - r, radius: r, startAngle: Math.PI / 2, endAngle: Math.PI },
+    { cx: x0 + r, cy: y0 + r, radius: r, startAngle: Math.PI, endAngle: Math.PI * 1.5 },
+  ];
+
   const numCheckpoints = 8;
   const checkpoints: Point[] = [];
   for (let i = 0; i < numCheckpoints; i++) {
@@ -242,6 +267,7 @@ export function createRoundedRectTrack(options: RoundedRectTrackOptions): TrackD
       bottomLeft: bottomLeftCorner,
       bottomRight: bottomRightCorner,
     },
+    cornerArcs,
     topStraight: { xStart: x0 + r, xEnd: x1 - r, y: y0 },
     bottomStraight: { xStart: x0 + r, xEnd: x1 - r, y: y1 },
     leftStraight: { yStart: y0 + r, yEnd: y1 - r, x: x0 },
@@ -309,6 +335,40 @@ export function distanceToCenterline(track: TrackDefinition, x: number, y: numbe
   return min;
 }
 
+// Interpolates the centerline's y at a given x, linearly between whichever
+// pair of consecutive points brackets it - the *exact* same interpolation
+// the canvas stroke does when connecting those points, so scenery that
+// needs to touch the actual drawn road edge (not a separate geometric
+// approximation of it, which can subtly mismatch the discretized polyline)
+// can compute exactly where that is. approxY disambiguates which part of
+// the loop, for tracks where multiple points might share a similar x.
+export function centerlineYAtX(track: TrackDefinition, x: number, approxY: number): number {
+  const pts = track.centerline;
+  const n = pts.length;
+  let bestIndex = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < n; i++) {
+    const d = Math.hypot(pts[i].x - x, pts[i].y - approxY);
+    if (d < bestDist) {
+      bestDist = d;
+      bestIndex = i;
+    }
+  }
+
+  function interpIfBrackets(a: Point, b: Point): number | null {
+    if ((x >= a.x && x <= b.x) || (x <= a.x && x >= b.x)) {
+      const t = b.x - a.x === 0 ? 0 : (x - a.x) / (b.x - a.x);
+      return a.y + (b.y - a.y) * t;
+    }
+    return null;
+  }
+
+  const prev = pts[(bestIndex - 1 + n) % n];
+  const cur = pts[bestIndex];
+  const next = pts[(bestIndex + 1) % n];
+  return interpIfBrackets(prev, cur) ?? interpIfBrackets(cur, next) ?? cur.y;
+}
+
 // Index of the centerline point closest to (x, y) - used by the cockpit
 // camera to find where "ahead" starts along the loop.
 export function findNearestPointIndex(track: TrackDefinition, x: number, y: number): number {
@@ -339,14 +399,6 @@ export function renderTrack(ctx: CanvasRenderingContext2D, track: TrackDefinitio
   ctx.lineWidth = track.width - 8;
   strokeClosedPath(ctx, pts);
 
-  for (let i = 1; i < track.checkpoints.length; i++) {
-    const cp = track.checkpoints[i];
-    ctx.fillStyle = 'rgba(255, 255, 0, 0.15)';
-    ctx.beginPath();
-    ctx.arc(cp.x, cp.y, track.checkpointRadius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   // Checkered start/finish line, perpendicular to the track direction
   const start = track.checkpoints[0];
   const startIndex = pts.indexOf(start);
@@ -371,12 +423,98 @@ export function renderTrack(ctx: CanvasRenderingContext2D, track: TrackDefinitio
   ctx.restore();
 }
 
+// Each non-start checkpoint as a pass/fail flag - red until the car reaches
+// it this lap (the actual pass/fail zone is unchanged, still the invisible
+// checkpointRadius circle at the checkpoint's own position on the road),
+// green after. Session-dependent (which checkpoints have been passed lives
+// in LapTracker, not the static track), so this takes that status in
+// rather than trying to derive it from track data alone.
+export function renderCheckpointFlags(ctx: CanvasRenderingContext2D, track: TrackDefinition, passed: boolean[]): void {
+  // Flags are planted on the infield side of each checkpoint rather than
+  // right on the road, so they mark the zone without sitting in the way -
+  // "inward" is approximated as "toward the loop's centroid".
+  const centroidX = track.centerline.reduce((sum, p) => sum + p.x, 0) / track.centerline.length;
+  const centroidY = track.centerline.reduce((sum, p) => sum + p.y, 0) / track.centerline.length;
+  const inwardOffset = 45;
+
+  for (let i = 1; i < track.checkpoints.length; i++) {
+    const cp = track.checkpoints[i];
+    const color = passed[i - 1] ? '#3c3' : '#c33';
+
+    const dx = centroidX - cp.x;
+    const dy = centroidY - cp.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const baseX = cp.x + (dx / len) * inwardOffset;
+    const baseY = cp.y + (dy / len) * inwardOffset;
+
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(baseX, baseY);
+    ctx.lineTo(baseX, baseY - 26);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(baseX, baseY - 26);
+    ctx.lineTo(baseX + 16, baseY - 20);
+    ctx.lineTo(baseX, baseY - 14);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 function strokeClosedPath(ctx: CanvasRenderingContext2D, pts: Point[]): void {
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
   ctx.closePath();
   ctx.stroke();
+}
+
+// Gravel runoff traps and red/green acceleration-zone curbing at all four
+// corners, following each corner's exact arc (center/radius/sweep) rather
+// than an approximation, so both trace the same curve the car actually
+// drives - the same "share one source of geometry" approach used
+// everywhere else in this file.
+export function renderCornerGravelAndCurbs(ctx: CanvasRenderingContext2D, track: TrackDefinition): void {
+  for (const arc of track.cornerArcs) {
+    const gravelInner = arc.radius + track.width / 2 + 2;
+    const gravelOuter = gravelInner + 20;
+
+    ctx.fillStyle = '#8a7355';
+    ctx.beginPath();
+    ctx.arc(arc.cx, arc.cy, gravelOuter, arc.startAngle, arc.endAngle);
+    ctx.arc(arc.cx, arc.cy, gravelInner, arc.endAngle, arc.startAngle, true);
+    ctx.closePath();
+    ctx.fill();
+
+    let seed = 77 + Math.round(arc.cx + arc.cy);
+    function nextRandom(): number {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    }
+    for (let i = 0; i < 50; i++) {
+      const t = arc.startAngle + (arc.endAngle - arc.startAngle) * nextRandom();
+      const rr = gravelInner + nextRandom() * (gravelOuter - gravelInner);
+      ctx.fillStyle = nextRandom() > 0.5 ? '#9c8468' : '#766048';
+      ctx.fillRect(arc.cx + rr * Math.cos(t), arc.cy + rr * Math.sin(t), 2, 2);
+    }
+
+    // Curb: alternating red/green segments painted right at the track's
+    // outer edge, like the acceleration/braking markers at a real apex.
+    const curbRadius = arc.radius + track.width / 2 - 5;
+    const segments = 10;
+    ctx.lineWidth = 8;
+    for (let i = 0; i < segments; i++) {
+      const t0 = arc.startAngle + ((arc.endAngle - arc.startAngle) * i) / segments;
+      const t1 = arc.startAngle + ((arc.endAngle - arc.startAngle) * (i + 1)) / segments;
+      ctx.strokeStyle = i % 2 === 0 ? '#c33' : '#3a3';
+      ctx.beginPath();
+      ctx.arc(arc.cx, arc.cy, curbRadius, t0, t1);
+      ctx.stroke();
+    }
+  }
 }
 
 // A guardrail specifically along each S-curve's outer edge - the section
