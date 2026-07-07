@@ -448,8 +448,17 @@ export function renderCheckpointFlags(ctx: CanvasRenderingContext2D, track: Trac
     const cp = track.checkpoints[i];
     const color = passed[i - 1] ? '#3c3' : '#c33';
 
+    // The centerline can contain back-to-back duplicate points (e.g. where
+    // a straight segment's endpoint coincides exactly with the following
+    // corner arc's first point) - stepping to the immediate next point can
+    // land on that duplicate, giving a zero-length (undefined) direction.
+    // Walk forward until a point that's actually different is found.
     const idx = pts.indexOf(cp);
-    const next = pts[(idx + 1) % pts.length];
+    let nextIdx = (idx + 1) % pts.length;
+    while (nextIdx !== idx && pts[nextIdx].x === cp.x && pts[nextIdx].y === cp.y) {
+      nextIdx = (nextIdx + 1) % pts.length;
+    }
+    const next = pts[nextIdx];
     const dirX = next.x - cp.x;
     const dirY = next.y - cp.y;
     const dirLen = Math.hypot(dirX, dirY) || 1;
@@ -466,18 +475,28 @@ export function renderCheckpointFlags(ctx: CanvasRenderingContext2D, track: Trac
     const baseX = cp.x + nx * inwardOffset;
     const baseY = cp.y + ny * inwardOffset;
 
+    // The pole/flag extend further along the same inward normal as the
+    // base offset (not a fixed screen-up direction) - near a straight-to-
+    // corner transition, the corner's pavement can curve back into a
+    // fixed-direction line even though the base point itself cleared the
+    // road, which used to plant the flag graphic back on the track.
+    const rx = -ny;
+    const ry = nx;
+    const tipX = baseX + nx * 26;
+    const tipY = baseY + ny * 26;
+
     ctx.strokeStyle = '#888';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(baseX, baseY);
-    ctx.lineTo(baseX, baseY - 26);
+    ctx.lineTo(tipX, tipY);
     ctx.stroke();
 
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(baseX, baseY - 26);
-    ctx.lineTo(baseX + 16, baseY - 20);
-    ctx.lineTo(baseX, baseY - 14);
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(baseX + nx * 20 + rx * 16, baseY + ny * 20 + ry * 16);
+    ctx.lineTo(baseX + nx * 14, baseY + ny * 14);
     ctx.closePath();
     ctx.fill();
   }
