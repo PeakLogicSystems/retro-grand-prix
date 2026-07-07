@@ -431,21 +431,40 @@ export function renderTrack(ctx: CanvasRenderingContext2D, track: TrackDefinitio
 // rather than trying to derive it from track data alone.
 export function renderCheckpointFlags(ctx: CanvasRenderingContext2D, track: TrackDefinition, passed: boolean[]): void {
   // Flags are planted on the infield side of each checkpoint rather than
-  // right on the road, so they mark the zone without sitting in the way -
-  // "inward" is approximated as "toward the loop's centroid".
+  // right on the road, so they mark the zone without sitting in the way.
+  // The offset direction is the local perpendicular to the track (not
+  // "toward the loop's centroid" directly) - on an S-curve the road bulges
+  // past the centroid, so a centroid-direction offset can land the flag on
+  // the driving line itself instead of beside it. The centroid is only
+  // used to pick which of the two perpendicular directions is inward.
   const centroidX = track.centerline.reduce((sum, p) => sum + p.x, 0) / track.centerline.length;
   const centroidY = track.centerline.reduce((sum, p) => sum + p.y, 0) / track.centerline.length;
-  const inwardOffset = 45;
+  const pts = track.centerline;
+  // Scales with road width so the flag always clears the track edge, plus
+  // a fixed gap so it doesn't hug the boundary.
+  const inwardOffset = track.width / 2 + 20;
 
   for (let i = 1; i < track.checkpoints.length; i++) {
     const cp = track.checkpoints[i];
     const color = passed[i - 1] ? '#3c3' : '#c33';
 
-    const dx = centroidX - cp.x;
-    const dy = centroidY - cp.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const baseX = cp.x + (dx / len) * inwardOffset;
-    const baseY = cp.y + (dy / len) * inwardOffset;
+    const idx = pts.indexOf(cp);
+    const next = pts[(idx + 1) % pts.length];
+    const dirX = next.x - cp.x;
+    const dirY = next.y - cp.y;
+    const dirLen = Math.hypot(dirX, dirY) || 1;
+    let nx = -dirY / dirLen;
+    let ny = dirX / dirLen;
+
+    // Flip the perpendicular so it points toward the centroid (inward)
+    // rather than outward, whichever of the two directions that is here.
+    if (nx * (centroidX - cp.x) + ny * (centroidY - cp.y) < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+
+    const baseX = cp.x + nx * inwardOffset;
+    const baseY = cp.y + ny * inwardOffset;
 
     ctx.strokeStyle = '#888';
     ctx.lineWidth = 2;
