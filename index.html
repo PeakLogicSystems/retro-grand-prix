@@ -3,13 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Retro Grand Prix</title>
   </head>
   <body>
     <div id="screen">
       <canvas id="game-canvas" width="960" height="640" tabindex="0"></canvas>
       <div id="crt-overlay"></div>
+    </div>
+    <div id="rotate-prompt">
+      <div id="rotate-icon">📱</div>
+      <p>Rotate your device to landscape to play</p>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
